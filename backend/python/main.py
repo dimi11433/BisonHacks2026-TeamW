@@ -1,13 +1,6 @@
 """
 AR Vision — Gemini Live API backend
-────────────────────────────────────
-Phone camera  →  FastAPI server  →  Gemini Live (persistent WebSocket)
-                      ↓
-               YOLO bounding boxes (local, real-time)
-                      ↓
-               Browser via WebSocket (overlays + steps)
 """
-
 import asyncio
 import base64
 import json
@@ -23,18 +16,16 @@ from fastapi.staticfiles import StaticFiles
 from google import genai
 from google.genai import types
 from ultralytics import YOLO
+from contextlib import asynccontextmanager
 
 # ─────────────────────────────────────────────
-#  CONFIG — only edit these
+#  CONFIG
 # ─────────────────────────────────────────────
-GEMINI_API_KEY   = "YOUR_API_KEY_HERE"   # ← paste your key
-CAMERA_INDEX     = 0                     # 0 = default webcam
-FRAME_INTERVAL   = 0.5                   # seconds between frames sent to Gemini Live
-CHANGE_THRESHOLD = 20                    # sensitivity for scene change detection
+GEMINI_API_KEY   = "AIzaSyDK6jsEOZ7fAFWC5qkUuETeKlZj7F9EqqA"
+CAMERA_INDEX     = 0
+FRAME_INTERVAL   = 1.0       # seconds between frames sent to Gemini
+CHANGE_THRESHOLD = 20
 
-# ─────────────────────────────────────────────
-#  SYSTEM PROMPT
-# ─────────────────────────────────────────────
 SYSTEM_PROMPT = """You are an AR assistant embedded in smart glasses.
 The user is looking at objects through their camera and wants to learn how to use them.
 
@@ -58,15 +49,14 @@ If no clear usable object is visible, respond with exactly: {"object": null}
 Never explain yourself. Always respond with only valid JSON."""
 
 # ─────────────────────────────────────────────
-#  APP + MODELS
+#  INIT — use types.HttpOptions (not plain dict)
 # ─────────────────────────────────────────────
-app = FastAPI()
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+gemini_client = genai.Client(
+    api_key=GEMINI_API_KEY,
+    http_options=types.HttpOptions(api_version="v1beta")
+)
 yolo = YOLO("yolo11n.pt")
 
-# Shared state
 state = {
     "frame_b64": None,
     "detections": [],
@@ -79,17 +69,22 @@ frame_queue: asyncio.Queue = None
 
 
 # ─────────────────────────────────────────────
-#  CHANGE DETECTION
+#  CHANGE DETECTION — fixed size mismatch
 # ─────────────────────────────────────────────
 _prev_gray = None
+_prev_shape = None
 
 def scene_changed(frame: np.ndarray) -> bool:
-    global _prev_gray
+    global _prev_gray, _prev_shape
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (21, 21), 0)
-    if _prev_gray is None:
+
+    # Reset if frame size changed (e.g. camera init frames)
+    if _prev_gray is None or _prev_shape != gray.shape:
         _prev_gray = gray
+        _prev_shape = gray.shape
         return True
+
     diff = cv2.absdiff(_prev_gray, gray)
     score = np.mean(diff)
     if score > CHANGE_THRESHOLD:
@@ -99,7 +94,7 @@ def scene_changed(frame: np.ndarray) -> bool:
 
 
 # ─────────────────────────────────────────────
-#  YOLO — local real-time detection
+#  YOLO
 # ─────────────────────────────────────────────
 def run_yolo(frame: np.ndarray) -> list:
     results = yolo(frame, verbose=False)
@@ -122,7 +117,7 @@ def run_yolo(frame: np.ndarray) -> list:
 
 
 # ─────────────────────────────────────────────
-#  CAMERA LOOP — background thread
+#  CAMERA LOOP
 # ─────────────────────────────────────────────
 def camera_loop(loop: asyncio.AbstractEventLoop):
     cap = cv2.VideoCapture(CAMERA_INDEX)
@@ -138,7 +133,6 @@ def camera_loop(loop: asyncio.AbstractEventLoop):
             continue
 
         detections = run_yolo(frame)
-
         _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
         frame_b64 = base64.standard_b64encode(buf).decode("utf-8")
 
@@ -146,15 +140,13 @@ def camera_loop(loop: asyncio.AbstractEventLoop):
             state["frame_b64"] = frame_b64
             state["detections"] = detections
 
-        # Send to Gemini Live when scene changes
         now = time.time()
         if (now - last_sent) >= FRAME_INTERVAL and scene_changed(frame):
             last_sent = now
             _, buf_hq = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            frame_bytes = buf_hq.tobytes()
             if frame_queue is not None:
                 asyncio.run_coroutine_threadsafe(
-                    frame_queue.put(frame_bytes), loop
+                    frame_queue.put(buf_hq.tobytes()), loop
                 )
 
         time.sleep(0.033)
@@ -167,7 +159,7 @@ def camera_loop(loop: asyncio.AbstractEventLoop):
 # ─────────────────────────────────────────────
 async def gemini_live_loop():
     global frame_queue
-    frame_queue = asyncio.Queue(maxsize=10)
+    frame_queue = asyncio.Queue(maxsize=5)
 
     print("🤖 Connecting to Gemini Live...")
 
@@ -176,10 +168,10 @@ async def gemini_live_loop():
         system_instruction=SYSTEM_PROMPT,
     )
 
-    while True:  # auto-reconnect loop
+    while True:
         try:
             async with gemini_client.aio.live.connect(
-                model="gemini-2.0-flash-live-001",
+                model="gemini-2.0-flash-exp",
                 config=config
             ) as session:
 
@@ -187,7 +179,6 @@ async def gemini_live_loop():
                     state["connected_to_gemini"] = True
                 print("✅ Gemini Live connected!")
 
-                # Buffer for assembling partial JSON responses
                 response_buffer = ""
 
                 async def send_frames():
@@ -212,7 +203,6 @@ async def gemini_live_loop():
                 async def receive_responses():
                     nonlocal response_buffer
                     async for response in session.receive():
-                        # Extract text from response
                         text = ""
                         if hasattr(response, "text") and response.text:
                             text = response.text
@@ -227,16 +217,16 @@ async def gemini_live_loop():
                             continue
 
                         response_buffer += text
-
-                        # Try to parse whenever buffer looks like complete JSON
                         clean = response_buffer.strip()
-                        if clean.startswith("```"):
+
+                        # Strip markdown fences
+                        if "```" in clean:
                             for chunk in clean.split("```"):
-                                if chunk.startswith("json"):
-                                    clean = chunk[4:].strip()
-                                    break
-                                elif "{" in chunk:
-                                    clean = chunk.strip()
+                                c = chunk.strip()
+                                if c.startswith("json"):
+                                    c = c[4:].strip()
+                                if c.startswith("{"):
+                                    clean = c
                                     break
 
                         if clean.startswith("{") and clean.endswith("}"):
@@ -246,9 +236,9 @@ async def gemini_live_loop():
                                     state["instructions"] = data
                                     state["processing"] = False
                                 print(f"✨ Detected: {data.get('object', 'nothing')}")
-                                response_buffer = ""  # reset for next response
+                                response_buffer = ""
                             except json.JSONDecodeError:
-                                pass  # incomplete, keep buffering
+                                pass  # keep buffering
 
                 await asyncio.gather(send_frames(), receive_responses())
 
@@ -262,8 +252,19 @@ async def gemini_live_loop():
 
 
 # ─────────────────────────────────────────────
-#  WEBSOCKET — streams to browser
+#  WEBSOCKET
 # ─────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    loop = asyncio.get_event_loop()
+    threading.Thread(target=camera_loop, args=(loop,), daemon=True).start()
+    asyncio.create_task(gemini_live_loop())
+    print("🚀 Server ready → http://localhost:8000")
+    yield
+
+app = FastAPI(lifespan=lifespan)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -284,23 +285,10 @@ async def ws_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         print("🔌 Browser disconnected")
 
-
 @app.get("/")
 async def root():
     with open("static/index.html") as f:
         return HTMLResponse(f.read())
-
-
-# ─────────────────────────────────────────────
-#  STARTUP
-# ─────────────────────────────────────────────
-@app.on_event("startup")
-async def startup():
-    loop = asyncio.get_event_loop()
-    threading.Thread(target=camera_loop, args=(loop,), daemon=True).start()
-    asyncio.create_task(gemini_live_loop())
-    print("🚀 Server ready → http://localhost:8000")
-
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
