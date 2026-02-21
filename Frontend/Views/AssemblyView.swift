@@ -7,26 +7,34 @@ import MWDATCamera
 struct AssemblyView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel = AssemblyViewModel()
+    @State private var streamState: StreamSessionState = .stopped
+    
+    private var useGlassesFeed: Bool {
+        streamState == .streaming
+    }
     
     var body: some View {
         ZStack {
-            // MARK: - Camera Background (auto-selected)
             #if canImport(ARKit) && canImport(UIKit)
-            Group {
-                if viewModel.cameraSource == .glasses {
-                    GlassesCameraView()
-                } else {
-                    ARCameraView()
+            GlassesCameraView(streamStateChanged: { state in
+                streamState = state
+                if state == .streaming {
+                    viewModel.isGlassesConnected = true
+                    viewModel.cameraSource = .glasses
                 }
-            }
+            })
             .ignoresSafeArea()
+            .opacity(useGlassesFeed ? 1 : 0)
+            
+            if !useGlassesFeed {
+                ARCameraView()
+                    .ignoresSafeArea()
+            }
             #else
             Color.black.ignoresSafeArea()
             #endif
             
-            // MARK: - Minimal HUD
             VStack(spacing: 0) {
-                
                 HStack {
                     Button {
                         viewModel.cleanup()
@@ -59,44 +67,8 @@ struct AssemblyView: View {
                 )
                 .padding(.bottom, 30)
             }
-            
-            if viewModel.isDetectingGlasses {
-                DetectingOverlay()
-            }
         }
         .preferredColorScheme(.dark)
         .statusBarHidden()
-        .onAppear {
-            viewModel.detectGlasses()
-        }
     }
 }
-
-// MARK: - Detecting Overlay
-
-private struct DetectingOverlay: View {
-    @State private var rotation: Double = 0
-    
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.6).ignoresSafeArea()
-            
-            VStack(spacing: 16) {
-                Image(systemName: "eyeglasses")
-                    .font(.system(size: 40, weight: .light, design: .rounded))
-                    .foregroundStyle(Color(hex: 0x00FFFF))
-                    .rotationEffect(.degrees(rotation))
-                
-                Text("Detecting glasses...")
-                    .font(.system(.subheadline, design: .rounded, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.7))
-            }
-            .onAppear {
-                withAnimation(.linear(duration: 2).repeatForever(autoreverses: false)) {
-                    rotation = 360
-                }
-            }
-        }
-    }
-}
-
