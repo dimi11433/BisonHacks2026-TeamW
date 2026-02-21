@@ -51,6 +51,38 @@ before moving on.
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(instructions=SYSTEM_INSTRUCTIONS)
+        
+    @function_tool()
+    async def show_ar_step(
+        self,
+        context: RunContext,
+        step: int,
+        animation: str,
+        instruction: str,
+    ) -> str:
+        """Show an AR animation overlay guiding the user through the current tourniquet step.
+
+        Args:
+            step: The current step number (1-5).
+            animation: The animation name to display. One of: position_tourniquet, pull_strap, twist_windlass, lock_windlass, note_time.
+            instruction: The instruction text to show on screen.
+        """
+        payload = json.dumps({
+            "type": "ar_step",
+            "step": step,
+            "animation": animation,
+            "instruction": instruction,
+        })
+
+        room = get_job_context().room
+        await room.local_participant.publish_data(
+            payload=payload.encode("utf-8"),
+            topic="ar_step",
+            reliable=True,
+        )
+
+        logger.info(f"Published AR step {step}: {animation}")
+        return f"AR step {step} shown to user."
 
     @function_tool()
     async def draw_bounding_box(
