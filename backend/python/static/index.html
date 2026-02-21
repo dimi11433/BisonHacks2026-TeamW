@@ -1,0 +1,1091 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0"
+    />
+    <title>AR Object Assistant</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap");
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      :root {
+        --bg: #030712;
+        --green: #00ff88;
+        --cyan: #00d4ff;
+        --orange: #ff6b2b;
+        --yellow: #ffd93d;
+        --white: #f0f4f8;
+        --dim: rgba(0, 255, 136, 0.15);
+        --glass: rgba(3, 7, 18, 0.75);
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--white);
+        font-family: "Space Mono", monospace;
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* ── HEADER ── */
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 20px;
+        border-bottom: 1px solid rgba(0, 255, 136, 0.2);
+        background: var(--glass);
+        backdrop-filter: blur(12px);
+        z-index: 100;
+      }
+
+      .logo {
+        font-family: "Syne", sans-serif;
+        font-weight: 800;
+        font-size: 1.1rem;
+        color: var(--green);
+        letter-spacing: 0.05em;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .logo-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--green);
+        animation: pulse 2s infinite;
+      }
+
+      .status-bar {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        font-size: 0.65rem;
+        color: rgba(240, 244, 248, 0.5);
+        letter-spacing: 0.1em;
+      }
+
+      .status-indicator {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--green);
+      }
+
+      .dot.thinking {
+        background: var(--orange);
+        animation: pulse 0.8s infinite;
+      }
+      .dot.offline {
+        background: #666;
+      }
+
+      /* ── MAIN LAYOUT ── */
+      .main {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        gap: 0;
+        overflow: hidden;
+      }
+
+      /* ── CAMERA VIEW ── */
+      .camera-wrap {
+        position: relative;
+        overflow: hidden;
+        background: #000;
+      }
+
+      #camera-img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      /* SVG overlay for bounding boxes + arrows */
+      #svg-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+
+      /* Three.js canvas overlay */
+      #three-canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+
+      /* Scanning animation when processing */
+      .scan-line {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          var(--green),
+          transparent
+        );
+        transform: translateY(-100%);
+        opacity: 0;
+        transition: opacity 0.3s;
+      }
+
+      .scan-line.active {
+        opacity: 1;
+        animation: scan 1.5s linear infinite;
+      }
+
+      @keyframes scan {
+        0% {
+          transform: translateY(-2px);
+        }
+        100% {
+          transform: translateY(100vh);
+        }
+      }
+
+      /* Corner brackets on camera view */
+      .corner {
+        position: absolute;
+        width: 24px;
+        height: 24px;
+        border-color: var(--green);
+        border-style: solid;
+        opacity: 0.6;
+      }
+      .corner.tl {
+        top: 12px;
+        left: 12px;
+        border-width: 2px 0 0 2px;
+      }
+      .corner.tr {
+        top: 12px;
+        right: 12px;
+        border-width: 2px 2px 0 0;
+      }
+      .corner.bl {
+        bottom: 12px;
+        left: 12px;
+        border-width: 0 0 2px 2px;
+      }
+      .corner.br {
+        bottom: 12px;
+        right: 12px;
+        border-width: 0 2px 2px 0;
+      }
+
+      /* ── SIDEBAR ── */
+      .sidebar {
+        display: flex;
+        flex-direction: column;
+        border-left: 1px solid rgba(0, 255, 136, 0.15);
+        background: var(--glass);
+        backdrop-filter: blur(12px);
+        overflow-y: auto;
+      }
+
+      .sidebar-section {
+        padding: 16px;
+        border-bottom: 1px solid rgba(0, 255, 136, 0.1);
+      }
+
+      .section-label {
+        font-size: 0.6rem;
+        letter-spacing: 0.2em;
+        color: var(--green);
+        text-transform: uppercase;
+        margin-bottom: 12px;
+        opacity: 0.8;
+      }
+
+      /* Object card */
+      .object-card {
+        background: rgba(0, 255, 136, 0.05);
+        border: 1px solid rgba(0, 255, 136, 0.2);
+        border-radius: 8px;
+        padding: 14px;
+        min-height: 60px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .object-name {
+        font-family: "Syne", sans-serif;
+        font-weight: 800;
+        font-size: 1.1rem;
+        color: var(--green);
+        text-transform: capitalize;
+      }
+
+      .object-tagline {
+        font-size: 0.7rem;
+        color: rgba(240, 244, 248, 0.6);
+        line-height: 1.4;
+      }
+
+      .empty-state {
+        font-size: 0.7rem;
+        color: rgba(240, 244, 248, 0.3);
+        font-style: italic;
+      }
+
+      /* Steps */
+      .steps-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .step-item {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        padding: 10px;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        cursor: pointer;
+        transition: all 0.2s;
+        opacity: 0.5;
+        transform: translateX(8px);
+      }
+
+      .step-item.active {
+        opacity: 1;
+        transform: translateX(0);
+        background: rgba(0, 212, 255, 0.08);
+        border-color: rgba(0, 212, 255, 0.3);
+      }
+
+      .step-item.done {
+        opacity: 0.4;
+        transform: translateX(0);
+      }
+
+      .step-num {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: rgba(0, 212, 255, 0.15);
+        border: 1px solid var(--cyan);
+        color: var(--cyan);
+        font-size: 0.65rem;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      .step-item.active .step-num {
+        background: var(--cyan);
+        color: var(--bg);
+      }
+
+      .step-item.done .step-num {
+        background: rgba(0, 255, 136, 0.2);
+        border-color: var(--green);
+        color: var(--green);
+      }
+
+      .step-text {
+        flex: 1;
+      }
+
+      .step-action {
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: var(--white);
+        margin-bottom: 2px;
+        font-family: "Syne", sans-serif;
+      }
+
+      .step-detail {
+        font-size: 0.62rem;
+        color: rgba(240, 244, 248, 0.5);
+        line-height: 1.4;
+      }
+
+      /* Parts list */
+      .parts-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .part-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px;
+        border-radius: 4px;
+        font-size: 0.65rem;
+      }
+
+      .part-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--orange);
+        flex-shrink: 0;
+      }
+
+      .part-name {
+        color: var(--orange);
+        font-weight: 700;
+      }
+      .part-desc {
+        color: rgba(240, 244, 248, 0.5);
+      }
+
+      /* YOLO detections */
+      .detection-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .detection-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 8px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.03);
+        font-size: 0.62rem;
+      }
+
+      .detection-label {
+        color: var(--yellow);
+        text-transform: capitalize;
+      }
+
+      .conf-bar-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .conf-bar {
+        width: 50px;
+        height: 3px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+
+      .conf-fill {
+        height: 100%;
+        background: var(--yellow);
+        border-radius: 2px;
+        transition: width 0.3s;
+      }
+
+      .conf-val {
+        color: rgba(240, 244, 248, 0.4);
+        font-size: 0.58rem;
+      }
+
+      /* Step nav buttons */
+      .step-nav {
+        display: flex;
+        gap: 8px;
+        padding: 16px;
+      }
+
+      .btn {
+        flex: 1;
+        padding: 10px;
+        border-radius: 6px;
+        border: 1px solid rgba(0, 255, 136, 0.3);
+        background: rgba(0, 255, 136, 0.05);
+        color: var(--green);
+        font-family: "Space Mono", monospace;
+        font-size: 0.65rem;
+        letter-spacing: 0.1em;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-transform: uppercase;
+      }
+
+      .btn:hover {
+        background: rgba(0, 255, 136, 0.15);
+      }
+      .btn:disabled {
+        opacity: 0.3;
+        cursor: default;
+      }
+
+      .btn.primary {
+        border-color: var(--cyan);
+        background: rgba(0, 212, 255, 0.1);
+        color: var(--cyan);
+      }
+
+      .btn.primary:hover {
+        background: rgba(0, 212, 255, 0.2);
+      }
+
+      /* Animations */
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.3;
+        }
+      }
+
+      @keyframes fadeInUp {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .animate-in {
+        animation: fadeInUp 0.4s ease forwards;
+      }
+
+      /* SVG styles */
+      .yolo-box {
+        fill: none;
+        stroke-width: 2;
+      }
+      .yolo-label {
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+      }
+      .arrow-path {
+        fill: none;
+        stroke-width: 3;
+        stroke-linecap: round;
+      }
+      .arrow-head {
+        stroke-width: 2;
+      }
+
+      /* Responsive */
+      @media (max-width: 640px) {
+        .main {
+          grid-template-columns: 1fr;
+          grid-template-rows: 1fr auto;
+        }
+        .sidebar {
+          max-height: 40vh;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="logo">
+        <div class="logo-dot"></div>
+        AR VISION
+      </div>
+      <div class="status-bar">
+        <div class="status-indicator">
+          <div class="dot" id="cam-dot"></div>
+          <span id="cam-status">CAMERA</span>
+        </div>
+        <div class="status-indicator">
+          <div class="dot offline" id="ai-dot"></div>
+          <span id="ai-status">AI READY</span>
+        </div>
+        <div class="status-indicator">
+          <div class="dot" id="ws-dot" style="background: #666"></div>
+          <span>WS</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="main">
+      <!-- CAMERA VIEW -->
+      <div class="camera-wrap" id="camera-wrap">
+        <img id="camera-img" alt="camera feed" />
+        <svg id="svg-overlay"></svg>
+        <canvas id="three-canvas"></canvas>
+        <div class="scan-line" id="scan-line"></div>
+        <div class="corner tl"></div>
+        <div class="corner tr"></div>
+        <div class="corner bl"></div>
+        <div class="corner br"></div>
+      </div>
+
+      <!-- SIDEBAR -->
+      <div class="sidebar">
+        <!-- Detected Object -->
+        <div class="sidebar-section">
+          <div class="section-label">// detected object</div>
+          <div class="object-card" id="object-card">
+            <div class="empty-state">Waiting for object...</div>
+          </div>
+        </div>
+
+        <!-- YOLO Detections -->
+        <div class="sidebar-section">
+          <div class="section-label">// yolo detections</div>
+          <div class="detection-list" id="detection-list">
+            <div
+              class="empty-state"
+              style="font-size: 0.65rem; color: rgba(240, 244, 248, 0.3)"
+            >
+              No detections
+            </div>
+          </div>
+        </div>
+
+        <!-- Steps -->
+        <div class="sidebar-section" style="flex: 1">
+          <div class="section-label">// interaction steps</div>
+          <div class="steps-list" id="steps-list">
+            <div
+              class="empty-state"
+              style="font-size: 0.65rem; color: rgba(240, 244, 248, 0.3)"
+            >
+              Point camera at an object
+            </div>
+          </div>
+        </div>
+
+        <!-- Parts -->
+        <div class="sidebar-section" id="parts-section" style="display: none">
+          <div class="section-label">// object parts</div>
+          <div class="parts-list" id="parts-list"></div>
+        </div>
+
+        <!-- Step Navigation -->
+        <div class="step-nav">
+          <button class="btn" id="btn-prev" onclick="prevStep()" disabled>
+            ← PREV
+          </button>
+          <button
+            class="btn primary"
+            id="btn-next"
+            onclick="nextStep()"
+            disabled
+          >
+            NEXT →
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ─────────────────────────────────────────────
+      //  STATE
+      // ─────────────────────────────────────────────
+      let currentInstructions = null;
+      let currentStep = 0;
+      let ws = null;
+
+      // ─────────────────────────────────────────────
+      //  THREE.JS SETUP (for 3D-ish floating labels)
+      // ─────────────────────────────────────────────
+      const canvas3d = document.getElementById("three-canvas");
+      const renderer = new THREE.WebGLRenderer({
+        canvas: canvas3d,
+        alpha: true,
+        antialias: true,
+      });
+      renderer.setClearColor(0x000000, 0);
+
+      const scene = new THREE.Scene();
+      const camera3d = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+      camera3d.position.z = 1;
+
+      // Floating particle system for active areas
+      const particles = [];
+
+      function resizeThree() {
+        const wrap = document.getElementById("camera-wrap");
+        renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+      }
+      window.addEventListener("resize", resizeThree);
+      resizeThree();
+
+      function animateThree() {
+        requestAnimationFrame(animateThree);
+        particles.forEach((p) => {
+          p.mesh.position.y += p.speed;
+          p.mesh.material.opacity -= 0.005;
+          if (p.mesh.material.opacity <= 0) {
+            scene.remove(p.mesh);
+            particles.splice(particles.indexOf(p), 1);
+          }
+        });
+        renderer.render(scene, camera3d);
+      }
+      animateThree();
+
+      function spawnParticle(x, y) {
+        // x,y in 0-1 normalized coords
+        const geo = new THREE.CircleGeometry(0.008, 8);
+        const mat = new THREE.MeshBasicMaterial({
+          color: 0x00ff88,
+          transparent: true,
+          opacity: 0.8,
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(x * 2 - 1, -(y * 2 - 1), 0);
+        scene.add(mesh);
+        particles.push({ mesh, speed: 0.004 + Math.random() * 0.004 });
+      }
+
+      // Periodically spawn particles near active bounding boxes
+      setInterval(() => {
+        if (currentInstructions && currentInstructions.object) {
+          const x = 0.3 + Math.random() * 0.4;
+          const y = 0.3 + Math.random() * 0.4;
+          spawnParticle(x, y);
+        }
+      }, 200);
+
+      // ─────────────────────────────────────────────
+      //  SVG OVERLAY — bounding boxes + arrows
+      // ─────────────────────────────────────────────
+      const svg = document.getElementById("svg-overlay");
+
+      function clearSVG() {
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+      }
+
+      function drawBoundingBoxes(detections) {
+        const W = svg.clientWidth;
+        const H = svg.clientHeight;
+
+        detections.forEach((d, i) => {
+          const { x, y, w, h } = d.box;
+          const px = x * W,
+            py = y * H,
+            pw = w * W,
+            ph = h * H;
+
+          // Box
+          const rect = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "rect",
+          );
+          rect.setAttribute("x", px);
+          rect.setAttribute("y", py);
+          rect.setAttribute("width", pw);
+          rect.setAttribute("height", ph);
+          rect.setAttribute("class", "yolo-box");
+          rect.setAttribute("stroke", "#ffd93d");
+          rect.setAttribute("stroke-dasharray", "6,3");
+          rect.style.opacity = "0.7";
+          svg.appendChild(rect);
+
+          // Label background
+          const labelBg = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "rect",
+          );
+          labelBg.setAttribute("x", px);
+          labelBg.setAttribute("y", py - 20);
+          labelBg.setAttribute("width", Math.min(pw, 120));
+          labelBg.setAttribute("height", 18);
+          labelBg.setAttribute("fill", "rgba(255,217,61,0.85)");
+          labelBg.setAttribute("rx", "3");
+          svg.appendChild(labelBg);
+
+          // Label text
+          const text = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "text",
+          );
+          text.setAttribute("x", px + 4);
+          text.setAttribute("y", py - 6);
+          text.setAttribute("class", "yolo-label");
+          text.setAttribute("fill", "#030712");
+          text.setAttribute("font-weight", "700");
+          text.textContent = `${d.label} ${Math.round(d.confidence * 100)}%`;
+          svg.appendChild(text);
+        });
+      }
+
+      function drawStepArrows(instructions, stepIndex) {
+        if (!instructions || !instructions.steps) return;
+        const W = svg.clientWidth;
+        const H = svg.clientHeight;
+
+        const step = instructions.steps[stepIndex];
+        if (!step) return;
+
+        // Determine arrow target position from "position" field
+        const posMap = {
+          top: { x: 0.5, y: 0.2 },
+          bottom: { x: 0.5, y: 0.8 },
+          left: { x: 0.2, y: 0.5 },
+          right: { x: 0.8, y: 0.5 },
+          middle: { x: 0.5, y: 0.5 },
+        };
+
+        const pos = posMap[step.position] || posMap.middle;
+        const tx = pos.x * W;
+        const ty = pos.y * H;
+
+        // Arrow line from offset
+        const sx = tx + (pos.x < 0.5 ? -80 : 80);
+        const sy = ty - 60;
+
+        const defs = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "defs",
+        );
+        defs.innerHTML = `
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#00d4ff"/>
+    </marker>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  `;
+        svg.appendChild(defs);
+
+        // Pulsing circle at target
+        const circle = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "circle",
+        );
+        circle.setAttribute("cx", tx);
+        circle.setAttribute("cy", ty);
+        circle.setAttribute("r", "16");
+        circle.setAttribute("fill", "rgba(0,212,255,0.15)");
+        circle.setAttribute("stroke", "#00d4ff");
+        circle.setAttribute("stroke-width", "2");
+        circle.setAttribute("filter", "url(#glow)");
+        circle.innerHTML = `<animate attributeName="r" values="14;20;14" dur="1.5s" repeatCount="indefinite"/>
+                      <animate attributeName="opacity" values="0.8;0.3;0.8" dur="1.5s" repeatCount="indefinite"/>`;
+        svg.appendChild(circle);
+
+        // Arrow
+        const line = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "line",
+        );
+        line.setAttribute("x1", sx);
+        line.setAttribute("y1", sy);
+        line.setAttribute("x2", tx);
+        line.setAttribute("y2", ty);
+        line.setAttribute("class", "arrow-path");
+        line.setAttribute("stroke", "#00d4ff");
+        line.setAttribute("marker-end", "url(#arrowhead)");
+        line.setAttribute("filter", "url(#glow)");
+        svg.appendChild(line);
+
+        // Step label box
+        const lbw = 180,
+          lbh = 50;
+        const lbx = Math.max(4, Math.min(W - lbw - 4, sx - lbw / 2));
+        const lby = sy - lbh - 4;
+
+        const labelRect = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "rect",
+        );
+        labelRect.setAttribute("x", lbx);
+        labelRect.setAttribute("y", lby);
+        labelRect.setAttribute("width", lbw);
+        labelRect.setAttribute("height", lbh);
+        labelRect.setAttribute("fill", "rgba(0,20,40,0.9)");
+        labelRect.setAttribute("stroke", "#00d4ff");
+        labelRect.setAttribute("stroke-width", "1");
+        labelRect.setAttribute("rx", "6");
+        svg.appendChild(labelRect);
+
+        // Step number
+        const stepNum = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "text",
+        );
+        stepNum.setAttribute("x", lbx + 10);
+        stepNum.setAttribute("y", lby + 16);
+        stepNum.setAttribute("fill", "#00d4ff");
+        stepNum.setAttribute("font-family", "Space Mono, monospace");
+        stepNum.setAttribute("font-size", "9");
+        stepNum.setAttribute("font-weight", "700");
+        stepNum.textContent = `STEP ${step.id}`;
+        svg.appendChild(stepNum);
+
+        // Action text
+        const actionText = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "text",
+        );
+        actionText.setAttribute("x", lbx + 10);
+        actionText.setAttribute("y", lby + 30);
+        actionText.setAttribute("fill", "#f0f4f8");
+        actionText.setAttribute("font-family", "Syne, sans-serif");
+        actionText.setAttribute("font-size", "12");
+        actionText.setAttribute("font-weight", "700");
+        actionText.textContent = step.action;
+        svg.appendChild(actionText);
+
+        // Detail text (truncated)
+        const detail =
+          step.detail.length > 35
+            ? step.detail.slice(0, 35) + "…"
+            : step.detail;
+        const detailText = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "text",
+        );
+        detailText.setAttribute("x", lbx + 10);
+        detailText.setAttribute("y", lby + 43);
+        detailText.setAttribute("fill", "rgba(240,244,248,0.5)");
+        detailText.setAttribute("font-family", "Space Mono, monospace");
+        detailText.setAttribute("font-size", "8");
+        detailText.textContent = detail;
+        svg.appendChild(detailText);
+      }
+
+      // ─────────────────────────────────────────────
+      //  UI UPDATES
+      // ─────────────────────────────────────────────
+      function updateObjectCard(instructions) {
+        const card = document.getElementById("object-card");
+        if (!instructions || !instructions.object) {
+          card.innerHTML = '<div class="empty-state">Scanning...</div>';
+          return;
+        }
+        card.innerHTML = `
+    <div class="object-name animate-in">${instructions.object}</div>
+    <div class="object-tagline animate-in">${instructions.tagline || ""}</div>
+  `;
+      }
+
+      function updateSteps(instructions, activeStep) {
+        const list = document.getElementById("steps-list");
+        if (!instructions || !instructions.steps) {
+          list.innerHTML =
+            '<div class="empty-state" style="font-size:0.65rem;color:rgba(240,244,248,0.3);">Point camera at an object</div>';
+          return;
+        }
+
+        list.innerHTML = instructions.steps
+          .map((s, i) => {
+            let cls = "step-item";
+            if (i === activeStep) cls += " active";
+            else if (i < activeStep) cls += " done";
+            const checkmark = i < activeStep ? "✓" : s.id;
+            return `
+      <div class="${cls} animate-in" onclick="goToStep(${i})" style="animation-delay:${i * 0.05}s">
+        <div class="step-num">${checkmark}</div>
+        <div class="step-text">
+          <div class="step-action">${s.action}</div>
+          <div class="step-detail">${s.detail}</div>
+        </div>
+      </div>
+    `;
+          })
+          .join("");
+
+        document.getElementById("btn-prev").disabled = activeStep === 0;
+        document.getElementById("btn-next").disabled =
+          activeStep >= instructions.steps.length - 1;
+      }
+
+      function updateParts(instructions) {
+        const section = document.getElementById("parts-section");
+        const list = document.getElementById("parts-list");
+        if (
+          !instructions ||
+          !instructions.parts ||
+          instructions.parts.length === 0
+        ) {
+          section.style.display = "none";
+          return;
+        }
+        section.style.display = "block";
+        list.innerHTML = instructions.parts
+          .map(
+            (p) => `
+    <div class="part-item">
+      <div class="part-dot"></div>
+      <span class="part-name">${p.name}</span>
+      <span class="part-desc"> — ${p.description}</span>
+    </div>
+  `,
+          )
+          .join("");
+      }
+
+      function updateDetections(detections) {
+        const list = document.getElementById("detection-list");
+        if (!detections || detections.length === 0) {
+          list.innerHTML =
+            '<div class="empty-state" style="font-size:0.65rem;color:rgba(240,244,248,0.3);">No detections</div>';
+          return;
+        }
+        list.innerHTML = detections
+          .map(
+            (d) => `
+    <div class="detection-item">
+      <span class="detection-label">${d.label}</span>
+      <div class="conf-bar-wrap">
+        <div class="conf-bar"><div class="conf-fill" style="width:${d.confidence * 100}%"></div></div>
+        <span class="conf-val">${Math.round(d.confidence * 100)}%</span>
+      </div>
+    </div>
+  `,
+          )
+          .join("");
+      }
+
+      function refreshOverlay() {
+        clearSVG();
+        drawBoundingBoxes(window._latestDetections || []);
+        if (currentInstructions) {
+          drawStepArrows(currentInstructions, currentStep);
+        }
+      }
+
+      // ─────────────────────────────────────────────
+      //  STEP NAVIGATION
+      // ─────────────────────────────────────────────
+      function goToStep(i) {
+        if (!currentInstructions) return;
+        currentStep = i;
+        updateSteps(currentInstructions, currentStep);
+        refreshOverlay();
+      }
+
+      function nextStep() {
+        if (!currentInstructions) return;
+        if (currentStep < currentInstructions.steps.length - 1) {
+          currentStep++;
+          updateSteps(currentInstructions, currentStep);
+          refreshOverlay();
+        }
+      }
+
+      function prevStep() {
+        if (currentStep > 0) {
+          currentStep--;
+          updateSteps(currentInstructions, currentStep);
+          refreshOverlay();
+        }
+      }
+
+      // ─────────────────────────────────────────────
+      //  WEBSOCKET
+      // ─────────────────────────────────────────────
+      function connectWS() {
+        const protocol = location.protocol === "https:" ? "wss" : "ws";
+        ws = new WebSocket(`${protocol}://${location.host}/ws`);
+
+        ws.onopen = () => {
+          document.getElementById("ws-dot").style.background = "#00ff88";
+          document.getElementById("cam-dot").style.background = "#00ff88";
+          console.log("✅ WebSocket connected");
+        };
+
+        ws.onmessage = (e) => {
+          const data = JSON.parse(e.data);
+
+          // Update camera frame
+          if (data.frame) {
+            document.getElementById("camera-img").src =
+              "data:image/jpeg;base64," + data.frame;
+          }
+
+          // Update detections
+          window._latestDetections = data.detections || [];
+          updateDetections(data.detections);
+
+          // Update AI status
+          const aiDot = document.getElementById("ai-dot");
+          const aiStatus = document.getElementById("ai-status");
+          const scanLine = document.getElementById("scan-line");
+
+          if (data.processing) {
+            aiDot.className = "dot thinking";
+            aiStatus.textContent = "THINKING...";
+            scanLine.classList.add("active");
+          } else {
+            aiDot.className = "dot";
+            aiDot.style.background = "#00ff88";
+            aiStatus.textContent = "AI READY";
+            scanLine.classList.remove("active");
+          }
+
+          // Update instructions if new object detected
+          if (data.instructions && data.instructions.object) {
+            const newObj = data.instructions.object;
+            const oldObj = currentInstructions?.object;
+
+            if (newObj !== oldObj) {
+              // New object — reset step
+              currentStep = 0;
+              currentInstructions = data.instructions;
+              updateObjectCard(currentInstructions);
+              updateSteps(currentInstructions, currentStep);
+              updateParts(currentInstructions);
+            }
+          }
+
+          // Always refresh overlay
+          refreshOverlay();
+        };
+
+        ws.onclose = () => {
+          document.getElementById("ws-dot").style.background = "#666";
+          setTimeout(connectWS, 2000); // auto-reconnect
+        };
+
+        ws.onerror = () => ws.close();
+      }
+
+      // ─────────────────────────────────────────────
+      //  KEYBOARD SHORTCUTS
+      // ─────────────────────────────────────────────
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowRight") nextStep();
+        if (e.key === "ArrowLeft") prevStep();
+      });
+
+      // ─────────────────────────────────────────────
+      //  START
+      // ─────────────────────────────────────────────
+      connectWS();
+    </script>
+  </body>
+</html>

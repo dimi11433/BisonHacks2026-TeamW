@@ -1,81 +1,49 @@
-import cv2
-import numpy as np
+"""
+AR Vision — Gemini Live API backend
+────────────────────────────────────
+Phone camera  →  FastAPI server  →  Gemini Live (persistent WebSocket)
+                      ↓
+               YOLO bounding boxes (local, real-time)
+                      ↓
+               Browser via WebSocket (overlays + steps)
+"""
+
+import asyncio
 import base64
 import json
-import time
 import threading
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
-import google.generativeai as genai
+import time
+
+import cv2
+import numpy as np
 import uvicorn
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from google import genai
+from google.genai import types
 from ultralytics import YOLO
 
 # ─────────────────────────────────────────────
-#  CONFIG
+#  CONFIG — only edit these
 # ─────────────────────────────────────────────
-GEMINI_API_KEY = "YOUR_API_KEY_HERE"       # <-- paste your Gemini key
-FRAME_CHANGE_THRESHOLD = 25               # sensitivity for change detection
-AI_COOLDOWN_SECONDS = 3                   # min seconds between AI calls
-CAMERA_INDEX = 0                          # 0 = default webcam
-
-# ─────────────────────────────────────────────
-#  INIT
-# ─────────────────────────────────────────────
-app = FastAPI()
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-genai.configure(api_key=GEMINI_API_KEY)
-gemini = genai.GenerativeModel("gemini-1.5-flash")
-yolo = YOLO("yolo11n.pt")  # downloads automatically on first run
-
-# Shared state between camera thread and websocket
-state = {
-    "latest_frame": None,
-    "latest_detections": [],
-    "latest_instructions": None,
-    "last_ai_call": 0,
-    "prev_gray": None,
-    "is_processing": False,
-}
-state_lock = threading.Lock()
-
+GEMINI_API_KEY   = "YOUR_API_KEY_HERE"   # ← paste your key
+CAMERA_INDEX     = 0                     # 0 = default webcam
+FRAME_INTERVAL   = 0.5                   # seconds between frames sent to Gemini Live
+CHANGE_THRESHOLD = 20                    # sensitivity for scene change detection
 
 # ─────────────────────────────────────────────
-#  FRAME CHANGE DETECTION
+#  SYSTEM PROMPT
 # ─────────────────────────────────────────────
-def scene_changed(frame: np.ndarray) -> bool:
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray, (21, 21), 0)
+SYSTEM_PROMPT = """You are an AR assistant embedded in smart glasses.
+The user is looking at objects through their camera and wants to learn how to use them.
 
-    with state_lock:
-        prev = state["prev_gray"]
-        if prev is None:
-            state["prev_gray"] = gray
-            return True
-        diff = cv2.absdiff(prev, gray)
-        score = np.mean(diff)
-        if score > FRAME_CHANGE_THRESHOLD:
-            state["prev_gray"] = gray
-            return True
-    return False
-
-
-# ─────────────────────────────────────────────
-#  CLAUDE VISION — identify object + get steps
-# ─────────────────────────────────────────────
-def ask_gemini(frame: np.ndarray) -> dict:
-    _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-    b64 = base64.standard_b64encode(buffer).decode("utf-8")
-
-    prompt = """You are an AR assistant. Look at this image and respond ONLY with valid JSON (no markdown, no explanation).
-
-If you see a recognizable object that someone might want to learn to use, return:
+When you see a recognizable object, respond ONLY with a JSON object like this (no markdown, no explanation):
 {
   "object": "name of object",
-  "tagline": "one sentence what it does",
+  "tagline": "one sentence describing what it does",
   "steps": [
-    { "id": 1, "action": "short action label", "detail": "one sentence instruction", "position": "top|middle|bottom|left|right" },
+    { "id": 1, "action": "short label", "detail": "one sentence instruction", "position": "top|middle|bottom|left|right" },
     { "id": 2, "action": "...", "detail": "...", "position": "..." },
     { "id": 3, "action": "...", "detail": "...", "position": "..." }
   ],
@@ -84,30 +52,59 @@ If you see a recognizable object that someone might want to learn to use, return
   ]
 }
 
-If no clear object, return: { "object": null }
+Position values describe WHERE on the object that step/part is physically located.
+Keep steps to 3-5. Be concise.
+If no clear usable object is visible, respond with exactly: {"object": null}
+Never explain yourself. Always respond with only valid JSON."""
 
-Keep steps to 3-5. Position values describe where on the object that step/part is located."""
+# ─────────────────────────────────────────────
+#  APP + MODELS
+# ─────────────────────────────────────────────
+app = FastAPI()
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-    image_part = {"mime_type": "image/jpeg", "data": b64}
-    response = gemini.generate_content([prompt, image_part])
+gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+yolo = YOLO("yolo11n.pt")
 
-    raw = response.text.strip()
-    # Strip markdown code fences if Gemini adds them
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    return json.loads(raw.strip())
+# Shared state
+state = {
+    "frame_b64": None,
+    "detections": [],
+    "instructions": None,
+    "processing": False,
+    "connected_to_gemini": False,
+}
+state_lock = threading.Lock()
+frame_queue: asyncio.Queue = None
 
 
 # ─────────────────────────────────────────────
-#  YOLO DETECTION
+#  CHANGE DETECTION
+# ─────────────────────────────────────────────
+_prev_gray = None
+
+def scene_changed(frame: np.ndarray) -> bool:
+    global _prev_gray
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (21, 21), 0)
+    if _prev_gray is None:
+        _prev_gray = gray
+        return True
+    diff = cv2.absdiff(_prev_gray, gray)
+    score = np.mean(diff)
+    if score > CHANGE_THRESHOLD:
+        _prev_gray = gray
+        return True
+    return False
+
+
+# ─────────────────────────────────────────────
+#  YOLO — local real-time detection
 # ─────────────────────────────────────────────
 def run_yolo(frame: np.ndarray) -> list:
     results = yolo(frame, verbose=False)
-    detections = []
     h, w = frame.shape[:2]
-
+    detections = []
     for result in results:
         for box in result.boxes:
             x1, y1, x2, y2 = box.xyxy[0].tolist()
@@ -125,14 +122,14 @@ def run_yolo(frame: np.ndarray) -> list:
 
 
 # ─────────────────────────────────────────────
-#  CAMERA LOOP (runs in background thread)
+#  CAMERA LOOP — background thread
 # ─────────────────────────────────────────────
-def camera_loop():
+def camera_loop(loop: asyncio.AbstractEventLoop):
     cap = cv2.VideoCapture(CAMERA_INDEX)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
     print("📷 Camera started")
+    last_sent = 0
 
     while True:
         ret, frame = cap.read()
@@ -140,71 +137,150 @@ def camera_loop():
             time.sleep(0.05)
             continue
 
-        # Always run YOLO (fast, local)
         detections = run_yolo(frame)
 
-        # Encode frame as base64 JPEG for browser
         _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
         frame_b64 = base64.standard_b64encode(buf).decode("utf-8")
 
         with state_lock:
-            state["latest_frame"] = frame_b64
-            state["latest_detections"] = detections
+            state["frame_b64"] = frame_b64
+            state["detections"] = detections
 
-        # Only call Claude if scene changed + cooldown passed + not already processing
+        # Send to Gemini Live when scene changes
         now = time.time()
-        cooldown_ok = (now - state["last_ai_call"]) > AI_COOLDOWN_SECONDS
+        if (now - last_sent) >= FRAME_INTERVAL and scene_changed(frame):
+            last_sent = now
+            _, buf_hq = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            frame_bytes = buf_hq.tobytes()
+            if frame_queue is not None:
+                asyncio.run_coroutine_threadsafe(
+                    frame_queue.put(frame_bytes), loop
+                )
 
-        if cooldown_ok and not state["is_processing"] and scene_changed(frame):
-            state["is_processing"] = True
-            state["last_ai_call"] = now
-
-            def call_claude():
-                try:
-                    print("🤖 Calling Claude...")
-                    result = ask_gemini(frame)
-                    with state_lock:
-                        state["latest_instructions"] = result
-                    print(f"✅ Detected: {result.get('object', 'nothing')}")
-                except Exception as e:
-                    print(f"❌ Claude error: {e}")
-                finally:
-                    with state_lock:
-                        state["is_processing"] = False
-
-            threading.Thread(target=call_claude, daemon=True).start()
-
-        time.sleep(0.033)  # ~30fps
+        time.sleep(0.033)
 
     cap.release()
 
 
 # ─────────────────────────────────────────────
-#  WEBSOCKET — streams everything to browser
+#  GEMINI LIVE SESSION
+# ─────────────────────────────────────────────
+async def gemini_live_loop():
+    global frame_queue
+    frame_queue = asyncio.Queue(maxsize=10)
+
+    print("🤖 Connecting to Gemini Live...")
+
+    config = types.LiveConnectConfig(
+        response_modalities=["TEXT"],
+        system_instruction=SYSTEM_PROMPT,
+    )
+
+    while True:  # auto-reconnect loop
+        try:
+            async with gemini_client.aio.live.connect(
+                model="gemini-2.0-flash-live-001",
+                config=config
+            ) as session:
+
+                with state_lock:
+                    state["connected_to_gemini"] = True
+                print("✅ Gemini Live connected!")
+
+                # Buffer for assembling partial JSON responses
+                response_buffer = ""
+
+                async def send_frames():
+                    while True:
+                        frame_bytes = await frame_queue.get()
+                        try:
+                            await session.send(
+                                input=types.LiveClientRealtimeInput(
+                                    media_chunks=[
+                                        types.Blob(
+                                            data=frame_bytes,
+                                            mime_type="image/jpeg"
+                                        )
+                                    ]
+                                )
+                            )
+                            with state_lock:
+                                state["processing"] = True
+                        except Exception as e:
+                            print(f"⚠️ Send error: {e}")
+
+                async def receive_responses():
+                    nonlocal response_buffer
+                    async for response in session.receive():
+                        # Extract text from response
+                        text = ""
+                        if hasattr(response, "text") and response.text:
+                            text = response.text
+                        elif hasattr(response, "server_content") and response.server_content:
+                            sc = response.server_content
+                            if hasattr(sc, "model_turn") and sc.model_turn:
+                                for part in sc.model_turn.parts:
+                                    if hasattr(part, "text") and part.text:
+                                        text += part.text
+
+                        if not text:
+                            continue
+
+                        response_buffer += text
+
+                        # Try to parse whenever buffer looks like complete JSON
+                        clean = response_buffer.strip()
+                        if clean.startswith("```"):
+                            for chunk in clean.split("```"):
+                                if chunk.startswith("json"):
+                                    clean = chunk[4:].strip()
+                                    break
+                                elif "{" in chunk:
+                                    clean = chunk.strip()
+                                    break
+
+                        if clean.startswith("{") and clean.endswith("}"):
+                            try:
+                                data = json.loads(clean)
+                                with state_lock:
+                                    state["instructions"] = data
+                                    state["processing"] = False
+                                print(f"✨ Detected: {data.get('object', 'nothing')}")
+                                response_buffer = ""  # reset for next response
+                            except json.JSONDecodeError:
+                                pass  # incomplete, keep buffering
+
+                await asyncio.gather(send_frames(), receive_responses())
+
+        except Exception as e:
+            print(f"❌ Gemini Live error: {e}")
+            with state_lock:
+                state["connected_to_gemini"] = False
+                state["processing"] = False
+            print("🔄 Reconnecting in 3s...")
+            await asyncio.sleep(3)
+
+
+# ─────────────────────────────────────────────
+#  WEBSOCKET — streams to browser
 # ─────────────────────────────────────────────
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def ws_endpoint(websocket: WebSocket):
     await websocket.accept()
     print("🔌 Browser connected")
-
     try:
         while True:
             with state_lock:
-                frame = state["latest_frame"]
-                detections = state["latest_detections"]
-                instructions = state["latest_instructions"]
-                processing = state["is_processing"]
-
-            if frame:
-                await websocket.send_json({
-                    "frame": frame,
-                    "detections": detections,
-                    "instructions": instructions,
-                    "processing": processing,
-                })
-
+                payload = {
+                    "frame":        state["frame_b64"],
+                    "detections":   state["detections"],
+                    "instructions": state["instructions"],
+                    "processing":   state["processing"],
+                    "gemini_live":  state["connected_to_gemini"],
+                }
+            if payload["frame"]:
+                await websocket.send_json(payload)
             await asyncio.sleep(0.033)
-
     except WebSocketDisconnect:
         print("🔌 Browser disconnected")
 
@@ -218,12 +294,12 @@ async def root():
 # ─────────────────────────────────────────────
 #  STARTUP
 # ─────────────────────────────────────────────
-import asyncio
-
 @app.on_event("startup")
 async def startup():
-    t = threading.Thread(target=camera_loop, daemon=True)
-    t.start()
+    loop = asyncio.get_event_loop()
+    threading.Thread(target=camera_loop, args=(loop,), daemon=True).start()
+    asyncio.create_task(gemini_live_loop())
+    print("🚀 Server ready → http://localhost:8000")
 
 
 if __name__ == "__main__":
