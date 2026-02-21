@@ -24,7 +24,7 @@ from ultralytics import YOLO
 # ─────────────────────────────────────────────
 #  CONFIG
 # ─────────────────────────────────────────────
-GEMINI_API_KEY   = "YOUR_API_KEY_HERE"
+GEMINI_API_KEY   = "AIzaSyDK6jsEOZ7fAFWC5qkUuETeKlZj7F9EqqA"
 CAMERA_INDEX     = 0
 FRAME_INTERVAL   = 2.0
 CHANGE_THRESHOLD = 20

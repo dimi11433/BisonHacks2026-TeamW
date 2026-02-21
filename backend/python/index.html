@@ -76,9 +76,11 @@
         active = false,
         audioCtx,
         processor,
-        stream;
+        stream,
+        gainNode;
       let spkCtx,
-        nextTime = 0;
+        nextTime = 0,
+        lastAudioTime = 0;
 
       function connect() {
         const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -86,20 +88,14 @@
 
         ws.onmessage = (e) => {
           const d = JSON.parse(e.data);
-
-          // Update camera feed
           if (d.frame)
             document.getElementById("camera").src =
               "data:image/jpeg;base64," + d.frame;
-
-          // Update status
           const btn = document.getElementById("btn");
           document.getElementById("status").textContent = d.connected
             ? "🟢 Gemini Live"
             : "🔴 Connecting...";
           btn.disabled = !d.connected;
-
-          // Play audio
           if (d.audio) play(d.audio);
         };
 
@@ -109,14 +105,9 @@
         };
       }
 
-      let lastAudioTime = 0;
-
       function play(b64) {
         if (!spkCtx) spkCtx = new AudioContext({ sampleRate: 24000 });
-
-        // Resume if browser suspended the context (common after silence)
         if (spkCtx.state === "suspended") spkCtx.resume();
-
         const raw = atob(b64);
         const i16 = new Int16Array(raw.length / 2);
         for (let i = 0; i < i16.length; i++)
@@ -129,10 +120,7 @@
         src.buffer = buf;
         src.connect(spkCtx.destination);
         const now = spkCtx.currentTime;
-
-        // If more than 0.5s gap since last audio, reset the clock (new response starting)
         if (nextTime < now || now - lastAudioTime > 0.5) nextTime = now + 0.05;
-
         src.start(nextTime);
         nextTime += buf.duration;
         lastAudioTime = now;
@@ -143,32 +131,38 @@
       }
 
       async function start() {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            sampleRate: 16000,
-            channelCount: 1,
-            echoCancellation: true,
-            noiseSuppression: true,
-          },
-        });
-        audioCtx = new AudioContext({ sampleRate: 16000 });
-        const src = audioCtx.createMediaStreamSource(stream);
-        processor = audioCtx.createScriptProcessor(4096, 1, 1);
-        processor.onaudioprocess = (e) => {
-          if (!active || ws.readyState !== WebSocket.OPEN) return;
-          const f32 = e.inputBuffer.getChannelData(0);
-          const i16 = new Int16Array(f32.length);
-          for (let i = 0; i < f32.length; i++)
-            i16[i] = Math.max(-32768, Math.min(32767, f32[i] * 32767));
-          ws.send(
-            JSON.stringify({
-              type: "mic",
-              data: btoa(String.fromCharCode(...new Uint8Array(i16.buffer))),
-            }),
-          );
-        };
-        src.connect(processor);
-        processor.connect(audioCtx.destination);
+        if (!audioCtx) {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              sampleRate: 16000,
+              channelCount: 1,
+              echoCancellation: true,
+              noiseSuppression: true,
+            },
+          });
+          audioCtx = new AudioContext({ sampleRate: 16000 });
+          const src = audioCtx.createMediaStreamSource(stream);
+          gainNode = audioCtx.createGain();
+          processor = audioCtx.createScriptProcessor(4096, 1, 1);
+          processor.onaudioprocess = (e) => {
+            if (!active || ws.readyState !== WebSocket.OPEN) return;
+            const f32 = e.inputBuffer.getChannelData(0);
+            const i16 = new Int16Array(f32.length);
+            for (let i = 0; i < f32.length; i++)
+              i16[i] = Math.max(-32768, Math.min(32767, f32[i] * 32767));
+            ws.send(
+              JSON.stringify({
+                type: "mic",
+                data: btoa(String.fromCharCode(...new Uint8Array(i16.buffer))),
+              }),
+            );
+          };
+          src.connect(gainNode);
+          gainNode.connect(processor);
+          processor.connect(audioCtx.destination);
+        }
+
+        if (audioCtx.state === "suspended") await audioCtx.resume();
         active = true;
         const btn = document.getElementById("btn");
         btn.textContent = "🔴 Stop";
@@ -176,12 +170,6 @@
       }
 
       function stop() {
-        processor?.disconnect();
-        processor = null;
-        audioCtx?.close();
-        audioCtx = null;
-        stream?.getTracks().forEach((t) => t.stop());
-        stream = null;
         active = false;
         const btn = document.getElementById("btn");
         btn.textContent = "🎙 Start Talking";
