@@ -1,6 +1,9 @@
 """
-AR Vision — Gemini Live API backend
+AR Vision — Dual-model backend
+  • gemini-2.5-flash-native-audio-preview-12-2025  →  voice conversation (mic in / speaker out)
+  • gemini-2.5-flash                               →  AR overlay JSON (camera snapshots)
 """
+
 import asyncio
 import base64
 import json
@@ -10,23 +13,31 @@ import time
 import cv2
 import numpy as np
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from google import genai
 from google.genai import types
 from ultralytics import YOLO
-from contextlib import asynccontextmanager
 
 # ─────────────────────────────────────────────
 #  CONFIG
 # ─────────────────────────────────────────────
-GEMINI_API_KEY   = "AIzaSyDK6jsEOZ7fAFWC5qkUuETeKlZj7F9EqqA"
+GEMINI_API_KEY   = "YOUR_API_KEY_HERE"
 CAMERA_INDEX     = 0
-FRAME_INTERVAL   = 1.0       # seconds between frames sent to Gemini
+FRAME_INTERVAL   = 2.0
 CHANGE_THRESHOLD = 20
 
-SYSTEM_PROMPT = """You are an AR assistant embedded in smart glasses.
+VOICE_MODEL   = "gemini-2.5-flash-native-audio-preview-12-2025"
+OVERLAY_MODEL = "gemini-2.5-flash"
+
+VOICE_SYSTEM_PROMPT = """You are an AR assistant embedded in smart glasses helping the user 
+interact with objects in their environment. You can see what the user sees through their camera.
+Be concise, helpful, and conversational. When you identify an object, briefly tell the user 
+what it is and how to use it. Keep responses short since they'll be spoken aloud."""
+
+OVERLAY_SYSTEM_PROMPT = """You are an AR assistant embedded in smart glasses.
 The user is looking at objects through their camera and wants to learn how to use them.
 
 When you see a recognizable object, respond ONLY with a JSON object like this (no markdown, no explanation):
@@ -43,18 +54,14 @@ When you see a recognizable object, respond ONLY with a JSON object like this (n
   ]
 }
 
-Position values describe WHERE on the object that step/part is physically located.
 Keep steps to 3-5. Be concise.
 If no clear usable object is visible, respond with exactly: {"object": null}
 Never explain yourself. Always respond with only valid JSON."""
 
 # ─────────────────────────────────────────────
-#  INIT — use types.HttpOptions (not plain dict)
+#  INIT
 # ─────────────────────────────────────────────
-gemini_client = genai.Client(
-    api_key=GEMINI_API_KEY,
-    http_options=types.HttpOptions(api_version="v1beta")
-)
+gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 yolo = YOLO("yolo11n.pt")
 
 state = {
@@ -62,14 +69,18 @@ state = {
     "detections": [],
     "instructions": None,
     "processing": False,
-    "connected_to_gemini": False,
+    "voice_connected": False,
+    "overlay_connected": False,
 }
 state_lock = threading.Lock()
-frame_queue: asyncio.Queue = None
+
+overlay_frame_queue: asyncio.Queue = None
+mic_audio_queue: asyncio.Queue = None
+speaker_audio_queue: asyncio.Queue = None
 
 
 # ─────────────────────────────────────────────
-#  CHANGE DETECTION — fixed size mismatch
+#  CHANGE DETECTION
 # ─────────────────────────────────────────────
 _prev_gray = None
 _prev_shape = None
@@ -78,16 +89,12 @@ def scene_changed(frame: np.ndarray) -> bool:
     global _prev_gray, _prev_shape
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (21, 21), 0)
-
-    # Reset if frame size changed (e.g. camera init frames)
     if _prev_gray is None or _prev_shape != gray.shape:
         _prev_gray = gray
         _prev_shape = gray.shape
         return True
-
     diff = cv2.absdiff(_prev_gray, gray)
-    score = np.mean(diff)
-    if score > CHANGE_THRESHOLD:
+    if np.mean(diff) > CHANGE_THRESHOLD:
         _prev_gray = gray
         return True
     return False
@@ -106,12 +113,8 @@ def run_yolo(frame: np.ndarray) -> list:
             detections.append({
                 "label": yolo.names[int(box.cls)],
                 "confidence": round(float(box.conf), 2),
-                "box": {
-                    "x": round(x1 / w, 4),
-                    "y": round(y1 / h, 4),
-                    "w": round((x2 - x1) / w, 4),
-                    "h": round((y2 - y1) / h, 4),
-                }
+                "box": {"x": round(x1/w,4), "y": round(y1/h,4),
+                        "w": round((x2-x1)/w,4), "h": round((y2-y1)/h,4)}
             })
     return detections
 
@@ -144,132 +147,178 @@ def camera_loop(loop: asyncio.AbstractEventLoop):
         if (now - last_sent) >= FRAME_INTERVAL and scene_changed(frame):
             last_sent = now
             _, buf_hq = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            if frame_queue is not None:
+            if overlay_frame_queue is not None:
                 asyncio.run_coroutine_threadsafe(
-                    frame_queue.put(buf_hq.tobytes()), loop
+                    overlay_frame_queue.put(buf_hq.tobytes()), loop
                 )
-
         time.sleep(0.033)
-
     cap.release()
 
 
 # ─────────────────────────────────────────────
-#  GEMINI LIVE SESSION
+#  OVERLAY LOOP — gemini-2.5-flash snapshots → JSON
 # ─────────────────────────────────────────────
-async def gemini_live_loop():
-    global frame_queue
-    frame_queue = asyncio.Queue(maxsize=5)
+async def overlay_loop():
+    global overlay_frame_queue
+    overlay_frame_queue = asyncio.Queue(maxsize=5)
+    print("🔍 AR overlay loop started")
 
-    print("🤖 Connecting to Gemini Live...")
+    while True:
+        try:
+            frame_bytes = await overlay_frame_queue.get()
+            with state_lock:
+                state["processing"] = True
+
+            image_b64 = base64.standard_b64encode(frame_bytes).decode("utf-8")
+
+            response = await gemini_client.aio.models.generate_content(
+                model=OVERLAY_MODEL,
+                contents=[
+                    types.Content(role="user", parts=[
+                        types.Part(text=OVERLAY_SYSTEM_PROMPT),
+                        types.Part(inline_data=types.Blob(
+                            mime_type="image/jpeg",
+                            data=image_b64
+                        )),
+                        types.Part(text="What object is this and how do I use it? JSON only.")
+                    ])
+                ]
+            )
+
+            text = response.text.strip() if response.text else ""
+            if "```" in text:
+                for chunk in text.split("```"):
+                    c = chunk.strip().lstrip("json").strip()
+                    if c.startswith("{"):
+                        text = c
+                        break
+
+            if text.startswith("{") and text.endswith("}"):
+                try:
+                    data = json.loads(text)
+                    with state_lock:
+                        state["instructions"] = data
+                        state["processing"] = False
+                        state["overlay_connected"] = True
+                    print(f"✨ AR overlay: {data.get('object', 'nothing')}")
+                except json.JSONDecodeError:
+                    with state_lock:
+                        state["processing"] = False
+            else:
+                with state_lock:
+                    state["processing"] = False
+
+        except Exception as e:
+            print(f"❌ Overlay error: {e}")
+            with state_lock:
+                state["processing"] = False
+            await asyncio.sleep(1)
+
+
+# ─────────────────────────────────────────────
+#  VOICE LOOP — native-audio Live (mic ↔ speaker)
+# ─────────────────────────────────────────────
+async def voice_loop():
+    global mic_audio_queue, speaker_audio_queue
+    mic_audio_queue = asyncio.Queue(maxsize=20)
+    speaker_audio_queue = asyncio.Queue(maxsize=50)
+    print("🎙️ Voice loop started")
 
     config = types.LiveConnectConfig(
-        response_modalities=["TEXT"],
-        system_instruction=SYSTEM_PROMPT,
+        response_modalities=["AUDIO"],
+        system_instruction=VOICE_SYSTEM_PROMPT,
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Aoede")
+            )
+        ),
     )
 
     while True:
         try:
             async with gemini_client.aio.live.connect(
-                model="gemini-2.0-flash-exp",
-                config=config
+                model=VOICE_MODEL, config=config
             ) as session:
 
                 with state_lock:
-                    state["connected_to_gemini"] = True
-                print("✅ Gemini Live connected!")
+                    state["voice_connected"] = True
+                print("✅ Voice connected!")
 
-                response_buffer = ""
-
-                async def send_frames():
+                async def send_mic():
                     while True:
-                        frame_bytes = await frame_queue.get()
+                        chunk = await mic_audio_queue.get()
                         try:
-                            await session.send(
-                                input=types.LiveClientRealtimeInput(
-                                    media_chunks=[
-                                        types.Blob(
-                                            data=frame_bytes,
-                                            mime_type="image/jpeg"
-                                        )
-                                    ]
-                                )
-                            )
-                            with state_lock:
-                                state["processing"] = True
+                            await session.send(input=types.LiveClientRealtimeInput(
+                                media_chunks=[types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")]
+                            ))
                         except Exception as e:
-                            print(f"⚠️ Send error: {e}")
+                            print(f"⚠️ Mic send: {e}")
+                            break
 
-                async def receive_responses():
-                    nonlocal response_buffer
-                    async for response in session.receive():
-                        text = ""
-                        if hasattr(response, "text") and response.text:
-                            text = response.text
-                        elif hasattr(response, "server_content") and response.server_content:
-                            sc = response.server_content
-                            if hasattr(sc, "model_turn") and sc.model_turn:
-                                for part in sc.model_turn.parts:
-                                    if hasattr(part, "text") and part.text:
-                                        text += part.text
-
-                        if not text:
-                            continue
-
-                        response_buffer += text
-                        clean = response_buffer.strip()
-
-                        # Strip markdown fences
-                        if "```" in clean:
-                            for chunk in clean.split("```"):
-                                c = chunk.strip()
-                                if c.startswith("json"):
-                                    c = c[4:].strip()
-                                if c.startswith("{"):
-                                    clean = c
-                                    break
-
-                        if clean.startswith("{") and clean.endswith("}"):
+                async def send_camera():
+                    """Periodically give Gemini a visual context frame"""
+                    while True:
+                        await asyncio.sleep(4)
+                        with state_lock:
+                            fb64 = state.get("frame_b64")
+                        if fb64:
                             try:
-                                data = json.loads(clean)
-                                with state_lock:
-                                    state["instructions"] = data
-                                    state["processing"] = False
-                                print(f"✨ Detected: {data.get('object', 'nothing')}")
-                                response_buffer = ""
-                            except json.JSONDecodeError:
-                                pass  # keep buffering
+                                await session.send(input=types.LiveClientRealtimeInput(
+                                    media_chunks=[types.Blob(
+                                        data=base64.standard_b64decode(fb64),
+                                        mime_type="image/jpeg"
+                                    )]
+                                ))
+                            except Exception:
+                                pass
 
-                await asyncio.gather(send_frames(), receive_responses())
+                async def recv_audio():
+                    async for response in session.receive():
+                        try:
+                            sc = response.server_content
+                            if sc and sc.model_turn:
+                                for part in sc.model_turn.parts:
+                                    if hasattr(part, "inline_data") and part.inline_data:
+                                        audio_b64 = base64.standard_b64encode(
+                                            part.inline_data.data
+                                        ).decode()
+                                        if not speaker_audio_queue.full():
+                                            await speaker_audio_queue.put(audio_b64)
+                        except Exception as e:
+                            print(f"⚠️ Audio recv: {e}")
+
+                await asyncio.gather(send_mic(), send_camera(), recv_audio())
 
         except Exception as e:
-            print(f"❌ Gemini Live error: {e}")
+            print(f"❌ Voice error: {e}")
             with state_lock:
-                state["connected_to_gemini"] = False
-                state["processing"] = False
-            print("🔄 Reconnecting in 3s...")
+                state["voice_connected"] = False
+            print("🔄 Voice reconnecting in 3s...")
             await asyncio.sleep(3)
 
 
 # ─────────────────────────────────────────────
-#  WEBSOCKET
+#  FASTAPI + WEBSOCKET
 # ─────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     loop = asyncio.get_event_loop()
     threading.Thread(target=camera_loop, args=(loop,), daemon=True).start()
-    asyncio.create_task(gemini_live_loop())
-    print("🚀 Server ready → http://localhost:8000")
+    asyncio.create_task(overlay_loop())
+    asyncio.create_task(voice_loop())
+    print("🚀 AR Vision ready → http://localhost:8000")
     yield
 
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket):
     await websocket.accept()
     print("🔌 Browser connected")
-    try:
+
+    async def send_state():
         while True:
             with state_lock:
                 payload = {
@@ -277,18 +326,47 @@ async def ws_endpoint(websocket: WebSocket):
                     "detections":   state["detections"],
                     "instructions": state["instructions"],
                     "processing":   state["processing"],
-                    "gemini_live":  state["connected_to_gemini"],
+                    "voice_live":   state["voice_connected"],
+                    "overlay_live": state["overlay_connected"],
+                    "audio":        None,
                 }
+            if speaker_audio_queue and not speaker_audio_queue.empty():
+                try:
+                    payload["audio"] = speaker_audio_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
             if payload["frame"]:
                 await websocket.send_json(payload)
             await asyncio.sleep(0.033)
+
+    async def recv_mic():
+        while True:
+            try:
+                msg = await websocket.receive()
+                if "bytes" in msg and mic_audio_queue and not mic_audio_queue.full():
+                    await mic_audio_queue.put(msg["bytes"])
+                elif "text" in msg:
+                    data = json.loads(msg["text"])
+                    if data.get("type") == "mic_audio" and mic_audio_queue:
+                        raw = base64.standard_b64decode(data["data"])
+                        if not mic_audio_queue.full():
+                            await mic_audio_queue.put(raw)
+            except WebSocketDisconnect:
+                raise
+            except Exception:
+                await asyncio.sleep(0.01)
+
+    try:
+        await asyncio.gather(send_state(), recv_mic())
     except WebSocketDisconnect:
         print("🔌 Browser disconnected")
+
 
 @app.get("/")
 async def root():
     with open("static/index.html") as f:
         return HTMLResponse(f.read())
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
