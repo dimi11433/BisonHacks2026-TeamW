@@ -1,0 +1,2 @@
+livekit-agents[silero,google,images]~=1.4
+python-dotenv
