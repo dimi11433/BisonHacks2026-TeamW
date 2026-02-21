@@ -10,6 +10,7 @@
 		970242CC2F4A47DB003C2931 /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 970242CB2F4A47DB003C2931 /* MWDATCamera */; };
 		970242CE2F4A47DB003C2931 /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 970242CD2F4A47DB003C2931 /* MWDATCore */; };
 		970242D02F4A47DB003C2931 /* MWDATMockDevice in Frameworks */ = {isa = PBXBuildFile; productRef = 970242CF2F4A47DB003C2931 /* MWDATMockDevice */; };
+		BB271E872F4A745200BAD4D3 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = BB271E862F4A745200BAD4D3 /* LiveKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 				970242CC2F4A47DB003C2931 /* MWDATCamera in Frameworks */,
 				970242D02F4A47DB003C2931 /* MWDATMockDevice in Frameworks */,
 				970242CE2F4A47DB003C2931 /* MWDATCore in Frameworks */,
+				BB271E872F4A745200BAD4D3 /* LiveKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -77,6 +79,7 @@
 				970242CB2F4A47DB003C2931 /* MWDATCamera */,
 				970242CD2F4A47DB003C2931 /* MWDATCore */,
 				970242CF2F4A47DB003C2931 /* MWDATMockDevice */,
+				BB271E862F4A745200BAD4D3 /* LiveKit */,
 			);
 			productName = W;
 			productReference = 970242BC2F4A3777003C2931 /* W.app */;
@@ -108,6 +111,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				970242CA2F4A47DB003C2931 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */,
+				BB271E852F4A745200BAD4D3 /* XCRemoteSwiftPackageReference "client-sdk-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 970242BD2F4A3777003C2931 /* Products */;
@@ -267,6 +271,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is needed for AR furniture assembly guidance.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Microphone access is needed for voice-activated assembly commands.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -313,6 +318,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is needed for AR furniture assembly guidance.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Microphone access is needed for voice-activated assembly commands.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -378,6 +384,14 @@
 				minimumVersion = 0.4.0;
 			};
 		};
+		BB271E852F4A745200BAD4D3 /* XCRemoteSwiftPackageReference "client-sdk-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/livekit/client-sdk-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.12.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -395,6 +409,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 970242CA2F4A47DB003C2931 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */;
 			productName = MWDATMockDevice;
+		};
+		BB271E862F4A745200BAD4D3 /* LiveKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BB271E852F4A745200BAD4D3 /* XCRemoteSwiftPackageReference "client-sdk-swift" */;
+			productName = LiveKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

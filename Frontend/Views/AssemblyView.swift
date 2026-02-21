@@ -1,6 +1,7 @@
 import SwiftUI
-import RealityKit
-import ARKit
+#if canImport(UIKit)
+import LiveKit
+#endif
 
 struct AssemblyView: View {
     @Environment(\.dismiss) private var dismiss
@@ -8,17 +9,49 @@ struct AssemblyView: View {
 
     var body: some View {
         ZStack {
-            // MARK: - Camera Background (auto-selected)
-            #if canImport(ARKit) && canImport(UIKit)
-            ARCameraView(isUsingGlasses: viewModel.cameraSource == .glasses)
-                .ignoresSafeArea()
+            // MARK: - Camera Background
+            #if canImport(UIKit)
+            if let track = viewModel.liveKit.localVideoTrack {
+                SwiftUIVideoView(track, layoutMode: .fill)
+                    .ignoresSafeArea()
+            } else {
+                Color.black.ignoresSafeArea()
+                VStack(spacing: 12) {
+                    if viewModel.liveKit.isConnecting {
+                        ProgressView()
+                            .tint(.white)
+                        Text("Connecting...")
+                            .foregroundStyle(.white)
+                    } else if let error = viewModel.liveKit.connectionError {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.largeTitle)
+                            .foregroundStyle(.orange)
+                        Text(error)
+                            .foregroundStyle(.white.opacity(0.7))
+                            .font(.caption)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
+                        Button("Retry") { viewModel.connectLiveKit() }
+                            .buttonStyle(.bordered)
+                            .tint(.white)
+                    } else if viewModel.liveKit.isConnected {
+                        ProgressView()
+                            .tint(.white)
+                        Text("Waiting for camera...")
+                            .foregroundStyle(.white)
+                    }
+                }
+            }
             #else
             Color.black.ignoresSafeArea()
             #endif
 
+            // MARK: - Bounding Box Overlay
+            BoundingBoxOverlay(boxes: viewModel.boundingBoxes)
+                .ignoresSafeArea()
+
             // MARK: - HUD Layer
             VStack {
-                // Top bar — close button only
                 HStack {
                     Button {
                         viewModel.cleanup()
@@ -31,14 +64,18 @@ struct AssemblyView: View {
                             .background(.ultraThinMaterial, in: Circle())
                             .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 0.5))
                     }
+
                     Spacer()
+
+                    #if canImport(UIKit)
+                    ConnectionPill(isConnected: viewModel.liveKit.isConnected)
+                    #endif
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
 
                 Spacer()
 
-                // Voice control at bottom
                 VoiceControlButton(
                     state: viewModel.voiceState,
                     waveformAmplitudes: viewModel.waveformAmplitudes,
@@ -51,6 +88,33 @@ struct AssemblyView: View {
         .statusBarHidden()
         .onAppear {
             viewModel.detectGlasses()
+            viewModel.connectLiveKit()
         }
+        .onDisappear {
+            viewModel.disconnectLiveKit()
+        }
+    }
+}
+
+// MARK: - Connection Indicator
+
+private struct ConnectionPill: View {
+    let isConnected: Bool
+    private let cyan = Color(hex: 0x00FFFF)
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(isConnected ? Color.green : Color.orange)
+                .frame(width: 6, height: 6)
+
+            Text(isConnected ? "Live" : "Connecting")
+                .font(.system(.caption2, design: .rounded, weight: .medium))
+                .foregroundStyle(.white.opacity(0.7))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.1), lineWidth: 0.5))
     }
 }
