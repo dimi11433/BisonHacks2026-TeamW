@@ -1,5 +1,18 @@
 import SwiftUI
 import Combine
+import MWDATCore
+
+enum CameraSource: String {
+    case phone = "iPhone Camera"
+    case glasses = "Meta Ray-Ban"
+    
+    var icon: String {
+        switch self {
+        case .phone:   return "iphone"
+        case .glasses: return "eyeglasses"
+        }
+    }
+}
 
 @Observable
 final class AssemblyViewModel {
@@ -19,13 +32,70 @@ final class AssemblyViewModel {
     var voiceState: VoiceTriggerState = .idle
     var isListening: Bool { voiceState == .listening }
     
-    // MARK: - Connection State
-    var isGlassesConnected: Bool = true
-    var isUsingGlasses: Bool = false
+    // MARK: - Connection & Camera Source
+    var isGlassesConnected: Bool = false
+    var cameraSource: CameraSource = .phone
+    var connectedDeviceName: String = ""
+    var isDetectingGlasses: Bool = false
+    
+    private var linkStateToken: (any AnyListenerToken)?
+    private var devicesToken: (any AnyListenerToken)?
     
     // MARK: - Waveform Animation
     var waveformAmplitudes: [CGFloat] = Array(repeating: 0.1, count: 7)
     private var waveformTimer: Timer?
+    
+    // MARK: - Lifecycle
+    
+    func detectGlasses() {
+        isDetectingGlasses = true
+        
+        let wearables = Wearables.shared
+        let deviceIds = wearables.devices
+        
+        if let firstId = deviceIds.first,
+           let device = wearables.deviceForIdentifier(firstId) {
+            let linked = device.linkState == .connected
+            isGlassesConnected = linked
+            cameraSource = linked ? .glasses : .phone
+            connectedDeviceName = device.name
+            
+            linkStateToken = device.addLinkStateListener { [weak self] state in
+                Task { @MainActor in
+                    self?.isGlassesConnected = (state == .connected)
+                    self?.cameraSource = (state == .connected) ? .glasses : .phone
+                }
+            }
+        } else {
+            isGlassesConnected = false
+            cameraSource = .phone
+        }
+        
+        devicesToken = wearables.addDevicesListener { [weak self] ids in
+            Task { @MainActor in
+                guard let self else { return }
+                if let firstId = ids.first,
+                   let device = wearables.deviceForIdentifier(firstId) {
+                    self.isGlassesConnected = (device.linkState == .connected)
+                    self.cameraSource = (device.linkState == .connected) ? .glasses : .phone
+                    self.connectedDeviceName = device.name
+                } else {
+                    self.isGlassesConnected = false
+                    self.cameraSource = .phone
+                    self.connectedDeviceName = ""
+                }
+            }
+        }
+        
+        isDetectingGlasses = false
+    }
+    
+    func cleanup() {
+        Task {
+            await linkStateToken?.cancel()
+            await devicesToken?.cancel()
+        }
+    }
     
     // MARK: - Navigation
     

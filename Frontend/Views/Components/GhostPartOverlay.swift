@@ -43,7 +43,7 @@ struct GhostPartOverlay: View {
                     .foregroundStyle(cyan.opacity(0.6))
                     .tracking(2)
                 
-                Text("Point at furniture part")
+                Text("Point at anything to get started")
                     .font(.system(.caption2, design: .rounded))
                     .foregroundStyle(.white.opacity(0.4))
             }

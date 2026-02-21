@@ -1,4 +1,5 @@
 import SwiftUI
+import MWDATCore
 
 struct HomeView: View {
     @State private var showAssembly = false
@@ -7,12 +8,12 @@ struct HomeView: View {
     @State private var contentOpacity: Double = 0
     @State private var buttonOffset: CGFloat = 30
     @State private var pulseRing: CGFloat = 1.0
+    @State private var glassesDetected = false
     
     private let cyan = Color(hex: 0x00FFFF)
     
     var body: some View {
         ZStack {
-            // Dark background with subtle gradient
             LinearGradient(
                 colors: [
                     Color(hex: 0x0A0A0F),
@@ -24,7 +25,6 @@ struct HomeView: View {
             )
             .ignoresSafeArea()
             
-            // Subtle grid pattern
             GridPatternView()
                 .opacity(0.04)
                 .ignoresSafeArea()
@@ -32,10 +32,9 @@ struct HomeView: View {
             VStack(spacing: 0) {
                 Spacer()
                 
-                // Logo + branding
+                // MARK: - Logo + Branding
                 VStack(spacing: 20) {
                     ZStack {
-                        // Pulse rings
                         Circle()
                             .stroke(cyan.opacity(0.08), lineWidth: 1)
                             .frame(width: 160, height: 160)
@@ -46,7 +45,6 @@ struct HomeView: View {
                             .frame(width: 200, height: 200)
                             .scaleEffect(pulseRing * 0.95)
                         
-                        // Icon container
                         Circle()
                             .fill(.ultraThinMaterial)
                             .frame(width: 100, height: 100)
@@ -56,61 +54,74 @@ struct HomeView: View {
                             )
                             .shadow(color: cyan.opacity(0.2), radius: 20)
                         
-                        Image(systemName: "cube.transparent")
-                            .font(.system(size: 38, weight: .light, design: .rounded))
+                        Image(systemName: "eye.trianglebadge.exclamationmark")
+                            .font(.system(size: 36, weight: .light, design: .rounded))
                             .foregroundStyle(cyan)
                     }
                     .scaleEffect(logoScale)
                     .opacity(logoOpacity)
                     
                     VStack(spacing: 8) {
-                        Text("Spatial Assembly")
+                        Text("Spatial")
                             .font(.system(size: 28, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
-                        
-                        Text("Assistant")
+                        +
+                        Text(" Assistant")
                             .font(.system(size: 28, weight: .light, design: .rounded))
                             .foregroundStyle(cyan)
                         
-                        Text("Voice-guided AR furniture assembly")
-                            .font(.system(.subheadline, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.4))
-                            .padding(.top, 4)
+                        Text("See it. Ask it. Know it.")
+                            .font(.system(.subheadline, design: .rounded, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .padding(.top, 2)
+                        
+                        Text("Your AI-powered spatial guide")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.3))
                     }
                     .opacity(logoOpacity)
                 }
                 
-                Spacer()
+                Spacer().frame(height: 30)
                 
-                // Connection + status cards
+                // MARK: - Use Case Pills
+                UseCaseStrip()
+                    .opacity(contentOpacity)
+                
+                Spacer().frame(height: 28)
+                
+                // MARK: - Status Cards
                 VStack(spacing: 12) {
                     StatusRow(
                         icon: "eyeglasses",
                         title: "Meta Ray-Ban",
-                        subtitle: "Ready to connect",
-                        accentColor: cyan
+                        subtitle: glassesDetected ? "Connected — will use glasses camera" : "Not detected — will use iPhone camera",
+                        accentColor: glassesDetected ? cyan : .orange,
+                        dotColor: glassesDetected ? .green : .orange
                     )
                     
                     StatusRow(
                         icon: "camera.viewfinder",
-                        title: "AR Engine",
-                        subtitle: "RealityKit active",
-                        accentColor: .green
+                        title: "AR Vision",
+                        subtitle: "Real-time spatial awareness",
+                        accentColor: .green,
+                        dotColor: .green
                     )
                     
                     StatusRow(
                         icon: "mic.badge.plus",
                         title: "Voice Control",
-                        subtitle: "Tap mic to speak commands",
-                        accentColor: .purple
+                        subtitle: "Just ask — hands-free interaction",
+                        accentColor: .purple,
+                        dotColor: .green
                     )
                 }
                 .padding(.horizontal, 24)
                 .opacity(contentOpacity)
                 
-                Spacer().frame(height: 40)
+                Spacer().frame(height: 36)
                 
-                // Start button
+                // MARK: - Start Button
                 Button {
                     withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
                         showAssembly = true
@@ -133,14 +144,14 @@ struct HomeView: View {
                 .opacity(contentOpacity)
                 .offset(y: buttonOffset)
                 
-                Spacer().frame(height: 16)
+                Spacer().frame(height: 14)
                 
-                Text("Point your camera at furniture parts to begin")
+                Text("Point your camera at anything and just ask")
                     .font(.system(.caption, design: .rounded))
                     .foregroundStyle(.white.opacity(0.25))
                     .opacity(contentOpacity)
                 
-                Spacer().frame(height: 40)
+                Spacer().frame(height: 36)
             }
         }
         .preferredColorScheme(.dark)
@@ -159,7 +170,72 @@ struct HomeView: View {
             withAnimation(.easeInOut(duration: 2.5).repeatForever(autoreverses: true)) {
                 pulseRing = 1.08
             }
+            checkForGlasses()
         }
+    }
+    
+    private func checkForGlasses() {
+        let wearables = Wearables.shared
+        let deviceIds = wearables.devices
+        if let firstId = deviceIds.first,
+           let device = wearables.deviceForIdentifier(firstId) {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                glassesDetected = (device.linkState == .connected)
+            }
+        } else {
+            glassesDetected = false
+        }
+    }
+}
+
+// MARK: - Use Case Strip
+
+private struct UseCaseStrip: View {
+    private let cases: [(icon: String, label: String)] = [
+        ("eyes", "Identify"),
+        ("book.fill", "Learn"),
+        ("wrench.and.screwdriver", "Build"),
+        ("location.fill", "Navigate"),
+        ("leaf.fill", "Explore"),
+        ("translate", "Translate"),
+    ]
+    
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(cases, id: \.label) { item in
+                    UseCasePill(icon: item.icon, label: item.label)
+                }
+            }
+            .padding(.horizontal, 24)
+        }
+    }
+}
+
+private struct UseCasePill: View {
+    let icon: String
+    let label: String
+    
+    private let cyan = Color(hex: 0x00FFFF)
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(.caption2, design: .rounded, weight: .medium))
+            Text(label)
+                .font(.system(.caption2, design: .rounded, weight: .medium))
+        }
+        .foregroundStyle(.white.opacity(0.6))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            Capsule()
+                .fill(.white.opacity(0.05))
+                .overlay(
+                    Capsule()
+                        .stroke(.white.opacity(0.08), lineWidth: 0.5)
+                )
+        )
     }
 }
 
@@ -170,6 +246,7 @@ private struct StatusRow: View {
     let title: String
     let subtitle: String
     let accentColor: Color
+    var dotColor: Color = .green
     
     var body: some View {
         HStack(spacing: 14) {
@@ -192,7 +269,7 @@ private struct StatusRow: View {
             Spacer()
             
             Circle()
-                .fill(.green)
+                .fill(dotColor)
                 .frame(width: 6, height: 6)
         }
         .padding(14)
