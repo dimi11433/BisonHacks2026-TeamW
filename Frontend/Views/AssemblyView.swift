@@ -1,6 +1,8 @@
 import SwiftUI
 import RealityKit
 import ARKit
+import MWDATCore
+import MWDATCamera
 
 struct AssemblyView: View {
     @Environment(\.dismiss) private var dismiss
@@ -10,33 +12,21 @@ struct AssemblyView: View {
         ZStack {
             // MARK: - Camera Background (auto-selected)
             #if canImport(ARKit) && canImport(UIKit)
-            ARCameraView(isUsingGlasses: viewModel.cameraSource == .glasses)
-                .ignoresSafeArea()
+            Group {
+                if viewModel.cameraSource == .glasses {
+                    GlassesCameraView()
+                } else {
+                    ARCameraView()
+                }
+            }
+            .ignoresSafeArea()
             #else
             Color.black.ignoresSafeArea()
             #endif
             
-            // Dim overlay for contrast
-            LinearGradient(
-                colors: [
-                    .black.opacity(0.5),
-                    .clear,
-                    .clear,
-                    .black.opacity(0.6)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-            
-            // MARK: - Ghost Part Bounding Box
-            GhostPartOverlay(isVisible: true)
-            
-            // MARK: - HUD Layer
+            // MARK: - Minimal HUD
             VStack(spacing: 0) {
                 
-                // Top bar
                 HStack {
                     Button {
                         viewModel.cleanup()
@@ -52,10 +42,6 @@ struct AssemblyView: View {
                     
                     Spacer()
                     
-                    ProductBadge()
-                    
-                    Spacer()
-                    
                     ConnectionStatusView(
                         isConnected: viewModel.isGlassesConnected,
                         source: viewModel.cameraSource
@@ -64,24 +50,8 @@ struct AssemblyView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 
-                // Camera source indicator
-                CameraSourceBanner(source: viewModel.cameraSource)
-                    .padding(.top, 8)
-                
-                Spacer().frame(height: 12)
-                
-                // Glassmorphism instruction card
-                GlassmorphismHUD(
-                    step: viewModel.currentStep,
-                    totalSteps: viewModel.totalSteps,
-                    progress: viewModel.progress,
-                    onNext: { viewModel.nextStep() },
-                    onPrevious: { viewModel.previousStep() }
-                )
-                
                 Spacer()
                 
-                // Voice control at bottom
                 VoiceControlButton(
                     state: viewModel.voiceState,
                     waveformAmplitudes: viewModel.waveformAmplitudes,
@@ -90,7 +60,6 @@ struct AssemblyView: View {
                 .padding(.bottom, 30)
             }
             
-            // Detection overlay
             if viewModel.isDetectingGlasses {
                 DetectingOverlay()
             }
@@ -100,43 +69,6 @@ struct AssemblyView: View {
         .onAppear {
             viewModel.detectGlasses()
         }
-    }
-}
-
-// MARK: - Camera Source Banner
-
-private struct CameraSourceBanner: View {
-    let source: CameraSource
-    @State private var appear = false
-    
-    private let cyan = Color(hex: 0x00FFFF)
-    
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: source.icon)
-                .font(.system(.caption2, design: .rounded, weight: .semibold))
-            
-            Text("Using \(source.rawValue)")
-                .font(.system(.caption2, design: .rounded, weight: .medium))
-        }
-        .foregroundStyle(source == .glasses ? cyan : .white.opacity(0.6))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .background(
-            Capsule()
-                .fill(source == .glasses ? cyan.opacity(0.12) : .white.opacity(0.06))
-                .overlay(
-                    Capsule()
-                        .stroke(source == .glasses ? cyan.opacity(0.25) : .white.opacity(0.08), lineWidth: 0.5)
-                )
-        )
-        .opacity(appear ? 1 : 0)
-        .onAppear {
-            withAnimation(.easeOut(duration: 0.4).delay(0.5)) {
-                appear = true
-            }
-        }
-        .animation(.easeInOut(duration: 0.3), value: source)
     }
 }
 
@@ -168,42 +100,3 @@ private struct DetectingOverlay: View {
     }
 }
 
-// MARK: - Product Badge
-
-private struct ProductBadge: View {
-    @State private var appear = false
-    
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "sparkles")
-                .font(.system(.caption, design: .rounded, weight: .semibold))
-                .foregroundStyle(Color(hex: 0x00FFFF))
-            
-            VStack(alignment: .leading, spacing: 1) {
-                Text("SPATIAL ASSIST")
-                    .font(.system(.caption2, design: .rounded, weight: .bold))
-                    .foregroundStyle(.white)
-                Text("Ask me anything")
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.5))
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background {
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Capsule()
-                        .stroke(.white.opacity(0.15), lineWidth: 0.5)
-                )
-        }
-        .opacity(appear ? 1 : 0)
-        .offset(y: appear ? 0 : -10)
-        .onAppear {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.3)) {
-                appear = true
-            }
-        }
-    }
-}

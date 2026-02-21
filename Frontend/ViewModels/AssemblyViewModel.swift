@@ -40,6 +40,7 @@ final class AssemblyViewModel {
     
     private var linkStateToken: (any AnyListenerToken)?
     private var devicesToken: (any AnyListenerToken)?
+    private var detectionTask: Task<Void, Never>?
     
     // MARK: - Waveform Animation
     var waveformAmplitudes: [CGFloat] = Array(repeating: 0.1, count: 7)
@@ -48,29 +49,146 @@ final class AssemblyViewModel {
     // MARK: - Lifecycle
     
     func detectGlasses() {
+        detectionTask?.cancel()
+        detectionTask = Task { @MainActor in
+            await detectGlassesAsync()
+        }
+    }
+    
+    private func detectGlassesAsync() async {
         isDetectingGlasses = true
-        
         let wearables = Wearables.shared
-        let deviceIds = wearables.devices
         
-        if let firstId = deviceIds.first,
-           let device = wearables.deviceForIdentifier(firstId) {
-            let linked = device.linkState == .connected
-            isGlassesConnected = linked
-            cameraSource = linked ? .glasses : .phone
-            connectedDeviceName = device.name
-            
-            linkStateToken = device.addLinkStateListener { [weak self] state in
-                Task { @MainActor in
-                    self?.isGlassesConnected = (state == .connected)
-                    self?.cameraSource = (state == .connected) ? .glasses : .phone
-                }
-            }
-        } else {
-            isGlassesConnected = false
-            cameraSource = .phone
+        print("[MWDAT] detectGlasses: registrationState = \(wearables.registrationState)")
+        print("[MWDAT] detectGlasses: devices (sync) = \(wearables.devices)")
+        
+        if let device = findConnectedDevice(wearables: wearables) {
+            print("[MWDAT] detectGlasses: found connected device immediately: \(device.name), linkState=\(device.linkState), type=\(device.deviceType())")
+            applyDevice(device)
+            isDetectingGlasses = false
+            startDevicesListener(wearables: wearables)
+            return
         }
         
+        print("[MWDAT] detectGlasses: no device yet, waiting on devicesStream (10s timeout)...")
+        let found = await waitForDevice(wearables: wearables, timeout: 10.0)
+        
+        if !found {
+            print("[MWDAT] detectGlasses: timed out, no connected glasses found")
+            isGlassesConnected = false
+            cameraSource = .phone
+            connectedDeviceName = ""
+        }
+        
+        isDetectingGlasses = false
+        startDevicesListener(wearables: wearables)
+    }
+    
+    private func waitForDevice(wearables: any WearablesInterface, timeout: TimeInterval) async -> Bool {
+        return await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                for await deviceIds in wearables.devicesStream() {
+                    if Task.isCancelled { return false }
+                    print("[MWDAT] devicesStream emitted: \(deviceIds)")
+                    for id in deviceIds {
+                        guard let device = wearables.deviceForIdentifier(id) else { continue }
+                        print("[MWDAT] device: \(device.name), linkState=\(device.linkState), type=\(device.deviceType())")
+                        
+                        if device.linkState == .connected {
+                            await MainActor.run {
+                                self.applyDevice(device)
+                            }
+                            return true
+                        }
+                        
+                        // Device exists but isn't connected yet -- wait for link state
+                        if device.linkState == .connecting {
+                            print("[MWDAT] device is connecting, waiting for link state change...")
+                            let connected = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+                                var resumed = false
+                                let token = device.addLinkStateListener { state in
+                                    print("[MWDAT] linkState changed to: \(state)")
+                                    guard !resumed else { return }
+                                    if state == .connected {
+                                        resumed = true
+                                        continuation.resume(returning: true)
+                                    }
+                                }
+                                
+                                Task {
+                                    try? await Task.sleep(for: .seconds(3))
+                                    guard !resumed else { return }
+                                    resumed = true
+                                    await token.cancel()
+                                    continuation.resume(returning: false)
+                                }
+                            }
+                            
+                            if connected {
+                                await MainActor.run {
+                                    self.applyDevice(device)
+                                }
+                                return true
+                            }
+                        }
+                    }
+                }
+                return false
+            }
+            
+            group.addTask {
+                try? await Task.sleep(for: .seconds(timeout))
+                return false
+            }
+            
+            if let result = await group.next() {
+                group.cancelAll()
+                return result
+            }
+            return false
+        }
+    }
+    
+    private func findConnectedDevice(wearables: any WearablesInterface) -> Device? {
+        for id in wearables.devices {
+            if let device = wearables.deviceForIdentifier(id) {
+                print("[MWDAT] findConnectedDevice: \(device.name), linkState=\(device.linkState)")
+                if device.linkState == .connected {
+                    return device
+                }
+            }
+        }
+        return nil
+    }
+    
+    @MainActor
+    private func applyDevice(_ device: Device) {
+        print("[MWDAT] applyDevice: \(device.name), requesting camera permission...")
+        isGlassesConnected = true
+        cameraSource = .glasses
+        connectedDeviceName = device.name
+        
+        Task {
+            do throws(PermissionError) {
+                let status = try await Wearables.shared.requestPermission(.camera)
+                print("[MWDAT] Camera permission result: \(status)")
+                if status == .denied {
+                    self.cameraSource = .phone
+                }
+            } catch {
+                print("[MWDAT] Camera permission request failed: \(error)")
+            }
+        }
+        
+        linkStateToken = device.addLinkStateListener { [weak self] state in
+            Task { @MainActor in
+                self?.isGlassesConnected = (state == .connected)
+                self?.cameraSource = (state == .connected) ? .glasses : .phone
+            }
+        }
+    }
+    
+    private func startDevicesListener(wearables: any WearablesInterface) {
         devicesToken = wearables.addDevicesListener { [weak self] ids in
             Task { @MainActor in
                 guard let self else { return }
@@ -86,11 +204,10 @@ final class AssemblyViewModel {
                 }
             }
         }
-        
-        isDetectingGlasses = false
     }
     
     func cleanup() {
+        detectionTask?.cancel()
         Task {
             await linkStateToken?.cancel()
             await devicesToken?.cancel()

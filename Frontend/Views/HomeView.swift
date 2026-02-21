@@ -9,6 +9,7 @@ struct HomeView: View {
     @State private var buttonOffset: CGFloat = 30
     @State private var pulseRing: CGFloat = 1.0
     @State private var glassesDetected = false
+    @State private var isConnecting = false
     
     private let cyan = Color(hex: 0x00FFFF)
     
@@ -92,13 +93,22 @@ struct HomeView: View {
                 
                 // MARK: - Status Cards
                 VStack(spacing: 12) {
-                    StatusRow(
-                        icon: "eyeglasses",
-                        title: "Meta Ray-Ban",
-                        subtitle: glassesDetected ? "Connected — will use glasses camera" : "Not detected — will use iPhone camera",
-                        accentColor: glassesDetected ? cyan : .orange,
-                        dotColor: glassesDetected ? .green : .orange
-                    )
+                    Button {
+                        connectGlasses()
+                    } label: {
+                        StatusRow(
+                            icon: "eyeglasses",
+                            title: "Meta Ray-Ban",
+                            subtitle: glassesDetected
+                                ? "Connected — will use glasses camera"
+                                : isConnecting
+                                    ? "Connecting..."
+                                    : "Tap to connect glasses",
+                            accentColor: glassesDetected ? cyan : .orange,
+                            dotColor: glassesDetected ? .green : isConnecting ? .yellow : .orange
+                        )
+                    }
+                    .disabled(glassesDetected || isConnecting)
                     
                     StatusRow(
                         icon: "camera.viewfinder",
@@ -176,14 +186,68 @@ struct HomeView: View {
     
     private func checkForGlasses() {
         let wearables = Wearables.shared
-        let deviceIds = wearables.devices
-        if let firstId = deviceIds.first,
-           let device = wearables.deviceForIdentifier(firstId) {
-            withAnimation(.easeInOut(duration: 0.3)) {
-                glassesDetected = (device.linkState == .connected)
+        print("[MWDAT] HomeView check: reg=\(wearables.registrationState), devices=\(wearables.devices)")
+        
+        for id in wearables.devices {
+            if let device = wearables.deviceForIdentifier(id),
+               device.linkState == .connected {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    glassesDetected = true
+                }
+                return
             }
-        } else {
-            glassesDetected = false
+        }
+        
+        // Also listen for devices appearing later
+        _ = wearables.addDevicesListener { ids in
+            Task { @MainActor in
+                for id in ids {
+                    if let device = wearables.deviceForIdentifier(id),
+                       device.linkState == .connected {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            glassesDetected = true
+                        }
+                        return
+                    }
+                }
+            }
+        }
+    }
+    
+    private func connectGlasses() {
+        isConnecting = true
+        Task {
+            let wearables = Wearables.shared
+            print("[MWDAT] User tapped connect. reg=\(wearables.registrationState)")
+            
+            if wearables.registrationState != .registered {
+                do throws(RegistrationError) {
+                    try await wearables.startRegistration()
+                    print("[MWDAT] Registration completed. devices=\(wearables.devices)")
+                } catch {
+                    print("[MWDAT] Registration error: \(error)")
+                }
+            }
+            
+            // Wait up to 5s for devices
+            for _ in 0..<10 {
+                try? await Task.sleep(for: .milliseconds(500))
+                if let id = wearables.devices.first,
+                   let device = wearables.deviceForIdentifier(id),
+                   device.linkState == .connected {
+                    await MainActor.run {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            glassesDetected = true
+                            isConnecting = false
+                        }
+                    }
+                    return
+                }
+            }
+            
+            await MainActor.run {
+                isConnecting = false
+            }
         }
     }
 }
