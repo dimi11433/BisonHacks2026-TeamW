@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-anthropic
+google-generativeai
 ultralytics
 opencv-python
 numpy

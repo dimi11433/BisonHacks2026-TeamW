@@ -7,14 +7,14 @@ import threading
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
-import anthropic
+import google.generativeai as genai
 import uvicorn
 from ultralytics import YOLO
 
 # ─────────────────────────────────────────────
 #  CONFIG
 # ─────────────────────────────────────────────
-ANTHROPIC_API_KEY = "YOUR_API_KEY_HERE"   # <-- paste your key
+GEMINI_API_KEY = "YOUR_API_KEY_HERE"       # <-- paste your Gemini key
 FRAME_CHANGE_THRESHOLD = 25               # sensitivity for change detection
 AI_COOLDOWN_SECONDS = 3                   # min seconds between AI calls
 CAMERA_INDEX = 0                          # 0 = default webcam
@@ -25,7 +25,8 @@ CAMERA_INDEX = 0                          # 0 = default webcam
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+genai.configure(api_key=GEMINI_API_KEY)
+gemini = genai.GenerativeModel("gemini-1.5-flash")
 yolo = YOLO("yolo11n.pt")  # downloads automatically on first run
 
 # Shared state between camera thread and websocket
@@ -63,7 +64,7 @@ def scene_changed(frame: np.ndarray) -> bool:
 # ─────────────────────────────────────────────
 #  CLAUDE VISION — identify object + get steps
 # ─────────────────────────────────────────────
-def ask_claude(frame: np.ndarray) -> dict:
+def ask_gemini(frame: np.ndarray) -> dict:
     _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
     b64 = base64.standard_b64encode(buffer).decode("utf-8")
 
@@ -87,20 +88,16 @@ If no clear object, return: { "object": null }
 
 Keep steps to 3-5. Position values describe where on the object that step/part is located."""
 
-    response = claude.messages.create(
-        model="claude-opus-4-6",
-        max_tokens=800,
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
-                {"type": "text", "text": prompt}
-            ]
-        }]
-    )
+    image_part = {"mime_type": "image/jpeg", "data": b64}
+    response = gemini.generate_content([prompt, image_part])
 
-    raw = response.content[0].text.strip()
-    return json.loads(raw)
+    raw = response.text.strip()
+    # Strip markdown code fences if Gemini adds them
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    return json.loads(raw.strip())
 
 
 # ─────────────────────────────────────────────
@@ -165,7 +162,7 @@ def camera_loop():
             def call_claude():
                 try:
                     print("🤖 Calling Claude...")
-                    result = ask_claude(frame)
+                    result = ask_gemini(frame)
                     with state_lock:
                         state["latest_instructions"] = result
                     print(f"✅ Detected: {result.get('object', 'nothing')}")
