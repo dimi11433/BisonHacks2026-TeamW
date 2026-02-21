@@ -44,6 +44,43 @@ final class AssemblyViewModel {
     // MARK: - Waveform Animation
     var waveformAmplitudes: [CGFloat] = Array(repeating: 0.1, count: 7)
     private var waveformTimer: Timer?
+
+    // MARK: - LiveKit
+    #if canImport(UIKit)
+    let liveKit = LiveKitManager()
+    #endif
+
+    var boundingBoxes: [BoundingBox] {
+        #if canImport(UIKit)
+        liveKit.boundingBoxes
+        #else
+        []
+        #endif
+    }
+
+    var isLiveKitConnected: Bool {
+        #if canImport(UIKit)
+        liveKit.isConnected
+        #else
+        false
+        #endif
+    }
+
+    func connectLiveKit() {
+        #if canImport(UIKit)
+        Task {
+            await liveKit.connect()
+        }
+        #endif
+    }
+
+    func disconnectLiveKit() {
+        #if canImport(UIKit)
+        Task {
+            await liveKit.disconnect()
+        }
+        #endif
+    }
     
     // MARK: - Lifecycle
     
@@ -91,6 +128,7 @@ final class AssemblyViewModel {
     }
     
     func cleanup() {
+        disconnectLiveKit()
         Task {
             await linkStateToken?.cancel()
             await devicesToken?.cancel()

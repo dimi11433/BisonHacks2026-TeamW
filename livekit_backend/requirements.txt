@@ -1,2 +1,5 @@
 livekit-agents[silero,google,images]~=1.4
+livekit-api
 python-dotenv
+fastapi
+uvicorn
