@@ -8,9 +8,9 @@ struct AssemblyView: View {
     
     var body: some View {
         ZStack {
-            // MARK: - AR Camera Background
+            // MARK: - Camera Background (auto-selected)
             #if canImport(ARKit) && canImport(UIKit)
-            ARCameraView(isUsingGlasses: viewModel.isUsingGlasses)
+            ARCameraView(isUsingGlasses: viewModel.cameraSource == .glasses)
                 .ignoresSafeArea()
             #else
             Color.black.ignoresSafeArea()
@@ -38,8 +38,8 @@ struct AssemblyView: View {
                 
                 // Top bar
                 HStack {
-                    // Back button
                     Button {
+                        viewModel.cleanup()
                         dismiss()
                     } label: {
                         Image(systemName: "xmark")
@@ -56,12 +56,19 @@ struct AssemblyView: View {
                     
                     Spacer()
                     
-                    ConnectionStatusView(isConnected: viewModel.isGlassesConnected)
+                    ConnectionStatusView(
+                        isConnected: viewModel.isGlassesConnected,
+                        source: viewModel.cameraSource
+                    )
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 
-                Spacer().frame(height: 16)
+                // Camera source indicator
+                CameraSourceBanner(source: viewModel.cameraSource)
+                    .padding(.top, 8)
+                
+                Spacer().frame(height: 12)
                 
                 // Glassmorphism instruction card
                 GlassmorphismHUD(
@@ -82,9 +89,82 @@ struct AssemblyView: View {
                 )
                 .padding(.bottom, 30)
             }
+            
+            // Detection overlay
+            if viewModel.isDetectingGlasses {
+                DetectingOverlay()
+            }
         }
         .preferredColorScheme(.dark)
         .statusBarHidden()
+        .onAppear {
+            viewModel.detectGlasses()
+        }
+    }
+}
+
+// MARK: - Camera Source Banner
+
+private struct CameraSourceBanner: View {
+    let source: CameraSource
+    @State private var appear = false
+    
+    private let cyan = Color(hex: 0x00FFFF)
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: source.icon)
+                .font(.system(.caption2, design: .rounded, weight: .semibold))
+            
+            Text("Using \(source.rawValue)")
+                .font(.system(.caption2, design: .rounded, weight: .medium))
+        }
+        .foregroundStyle(source == .glasses ? cyan : .white.opacity(0.6))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(source == .glasses ? cyan.opacity(0.12) : .white.opacity(0.06))
+                .overlay(
+                    Capsule()
+                        .stroke(source == .glasses ? cyan.opacity(0.25) : .white.opacity(0.08), lineWidth: 0.5)
+                )
+        )
+        .opacity(appear ? 1 : 0)
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.4).delay(0.5)) {
+                appear = true
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: source)
+    }
+}
+
+// MARK: - Detecting Overlay
+
+private struct DetectingOverlay: View {
+    @State private var rotation: Double = 0
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.6).ignoresSafeArea()
+            
+            VStack(spacing: 16) {
+                Image(systemName: "eyeglasses")
+                    .font(.system(size: 40, weight: .light, design: .rounded))
+                    .foregroundStyle(Color(hex: 0x00FFFF))
+                    .rotationEffect(.degrees(rotation))
+                
+                Text("Detecting glasses...")
+                    .font(.system(.subheadline, design: .rounded, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            .onAppear {
+                withAnimation(.linear(duration: 2).repeatForever(autoreverses: false)) {
+                    rotation = 360
+                }
+            }
+        }
     }
 }
 
@@ -95,15 +175,15 @@ private struct ProductBadge: View {
     
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "wrench.and.screwdriver")
+            Image(systemName: "sparkles")
                 .font(.system(.caption, design: .rounded, weight: .semibold))
                 .foregroundStyle(Color(hex: 0x00FFFF))
             
             VStack(alignment: .leading, spacing: 1) {
-                Text("IKEA MALM")
+                Text("SPATIAL ASSIST")
                     .font(.system(.caption2, design: .rounded, weight: .bold))
                     .foregroundStyle(.white)
-                Text("Bed Frame Assembly")
+                Text("Ask me anything")
                     .font(.system(size: 9, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.5))
             }
