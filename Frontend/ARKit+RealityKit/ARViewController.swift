@@ -43,15 +43,11 @@ class ARViewController: UIViewController {
     // Call this when JSON arrives from LiveKit
     func onStepReceived(animation: String, instruction: String) {
         DispatchQueue.main.async {
-            // Update instruction text
             self.instructionLabel.text = instruction
-            
-            // Remove previous animation
             self.currentAnchor?.removeFromParent()
             
-            // Load and place new animation anchored to left forearm
             if let model = try? Entity.load(named: animation) {
-                let anchor = AnchorEntity(.bodyPosition(.leftForearm))
+                let anchor = AnchorEntity(plane: .horizontal)
                 anchor.addChild(model)
                 self.arView.scene.addAnchor(anchor)
                 self.currentAnchor = anchor
