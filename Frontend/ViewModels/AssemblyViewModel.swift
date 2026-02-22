@@ -153,9 +153,10 @@ final class AssemblyViewModel {
             connectedDeviceName = device.name
             
             linkStateToken = device.addLinkStateListener { [weak self] state in
-                Task { @MainActor in
-                    self?.isGlassesConnected = (state == .connected)
-                    self?.cameraSource = (state == .connected) ? .glasses : .phone
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.isGlassesConnected = (state == .connected)
+                    self.cameraSource = (state == .connected) ? .glasses : .phone
                 }
             }
         } else {
@@ -164,7 +165,7 @@ final class AssemblyViewModel {
         }
         
         devicesToken = wearables.addDevicesListener { [weak self] ids in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 if let firstId = ids.first,
                    let device = wearables.deviceForIdentifier(firstId) {
