@@ -214,6 +214,7 @@ final class AssemblyViewModel {
         case .listening:
             voiceState = .responding
             stopWaveformAnimation()
+            liveKit.boundingBoxes = []
             Task { await liveKit.setMicEnabled(false) }
         case .responding:
             voiceState = .listening
