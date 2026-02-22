@@ -143,10 +143,6 @@ final class AssemblyViewModel {
         isDetectingGlasses = true
         
         let wearables = Wearables.shared
-        
-        // Give the SDK a moment to discover devices
-        try? await Task.sleep(for: .milliseconds(500))
-        
         let deviceIds = wearables.devices
         
         if let firstId = deviceIds.first,

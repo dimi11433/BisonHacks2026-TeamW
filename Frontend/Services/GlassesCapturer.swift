@@ -66,8 +66,8 @@ final class GlassesCapturer: Sendable {
         print("[Glasses] Session started, state: \(session.state)")
 
         // waitingForDevice is normal — the AutoDeviceSelector will find glasses
-        // when they connect. We wait up to 15 seconds for streaming to begin.
-        let deadline = Date().addingTimeInterval(15)
+        // when they connect. Wait briefly for streaming to begin, then fall back.
+        let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
             let state = session.state
             if state == .streaming {
