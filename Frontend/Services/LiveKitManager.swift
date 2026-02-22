@@ -198,11 +198,9 @@ extension LiveKitManager: RoomDelegate {
 
         if topic == "bounding_box" {
             let capturedData = data
-            Task.detached {
+            Task { @MainActor in
                 guard let box = try? JSONDecoder().decode(BoundingBox.self, from: capturedData) else { return }
-                await MainActor.run {
-                    self.boundingBoxes = [box]
-                }
+                self.boundingBoxes = [box]
             }
         }
 
