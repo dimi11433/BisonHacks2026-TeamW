@@ -9,17 +9,22 @@ import UIKit
 final class LiveKitManager: NSObject {
 
     // MARK: - Configuration
-    // Update this after starting ngrok: `ngrok http 3001`
     static var tokenServerURL = "https://f10d-138-238-254-107.ngrok-free.app"
 
     // MARK: - Public State
     var isConnected = false
     var isConnecting = false
-    var boundingBoxes: [BoundingBox] = []
-    var localVideoTrack: VideoTrack?
     var connectionError: String?
+    var localVideoTrack: VideoTrack?
     var isAgentSpeaking = false
     var usingGlasses = false
+
+    // MARK: - Overlay State
+    var activeOverlays: [OverlayCommand] = []
+    var overlayInstruction: String = ""
+    var activeAnimation: AnimationCommand?
+
+    // MARK: - Callbacks
     var onAgentStoppedSpeaking: (() -> Void)?
     var onGlassesDisconnected: (() -> Void)?
 
@@ -145,7 +150,9 @@ final class LiveKitManager: NSObject {
         isConnected = false
         usingGlasses = false
         localVideoTrack = nil
-        boundingBoxes = []
+        activeOverlays = []
+        activeAnimation = nil
+        overlayInstruction = ""
     }
 
     // MARK: - Mic Control
@@ -155,6 +162,13 @@ final class LiveKitManager: NSObject {
         } catch {
             print("[LiveKit] Mic error: \(error)")
         }
+    }
+
+    // MARK: - Overlay Control
+    func clearAllOverlays() {
+        activeOverlays = []
+        activeAnimation = nil
+        overlayInstruction = ""
     }
 
     // MARK: - Token Fetch
@@ -209,23 +223,37 @@ extension LiveKitManager: RoomDelegate {
 
     nonisolated func room(_ room: Room, participant: RemoteParticipant?, didReceiveData data: Data, forTopic topic: String, encryptionType: EncryptionType) {
 
-        if topic == "bounding_box" {
+        if topic == "ar_overlay" {
+            print("[AR] ar_overlay received — raw: \(String(data: data, encoding: .utf8) ?? "<binary>")")
             let capturedData = data
             Task { @MainActor in
-                guard let box = try? JSONDecoder().decode(BoundingBox.self, from: capturedData) else { return }
-                self.boundingBoxes.append(box)
+                guard let payload = try? JSONDecoder().decode(OverlayPayload.self, from: capturedData) else {
+                    print("[AR] Failed to decode ar_overlay payload")
+                    return
+                }
+                self.activeOverlays.append(contentsOf: payload.overlays)
+                if let instruction = payload.instruction, !instruction.isEmpty {
+                    self.overlayInstruction = instruction
+                }
             }
         }
 
-        if topic == "ar_step" {
-            print("[AR] ar_step received — raw: \(String(data: data, encoding: .utf8) ?? "<binary>")")
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let animation = json["animation"] as? String,
-                let instruction = json["instruction"] as? String {
-                print("[AR] parsed — animation: \(animation), instruction: \(instruction)")
-                Task { @MainActor in
-                    ARStepManager.shared.trigger(animation: animation, instruction: instruction)
+        if topic == "ar_animation" {
+            print("[AR] ar_animation received — raw: \(String(data: data, encoding: .utf8) ?? "<binary>")")
+            let capturedData = data
+            Task { @MainActor in
+                guard let anim = try? JSONDecoder().decode(AnimationCommand.self, from: capturedData) else {
+                    print("[AR] Failed to decode ar_animation payload")
+                    return
                 }
+                self.activeAnimation = anim
+            }
+        }
+
+        if topic == "ar_clear" {
+            print("[AR] ar_clear received")
+            Task { @MainActor in
+                self.clearAllOverlays()
             }
         }
     }
@@ -244,7 +272,8 @@ extension LiveKitManager: RoomDelegate {
             let wasSpeaking = self.isAgentSpeaking
             self.isAgentSpeaking = isSpeaking
             if !wasSpeaking && isSpeaking {
-                self.boundingBoxes = []
+                self.activeOverlays = []
+                self.overlayInstruction = ""
             }
             if wasSpeaking && !isSpeaking {
                 self.onAgentStoppedSpeaking?()

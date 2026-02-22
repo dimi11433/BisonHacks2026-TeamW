@@ -11,22 +11,41 @@ struct AssemblyView: View {
 
     var body: some View {
         ZStack {
-            // MARK: - Camera Background (ARView)
+            // MARK: - Layer 0: Camera Background
             #if canImport(UIKit)
             if viewModel.liveKit.isConnected {
                 if viewModel.liveKit.usingGlasses, let track = viewModel.liveKit.localVideoTrack {
                     ZStack {
                         SwiftUIVideoView(track, layoutMode: .fill)
                             .ignoresSafeArea()
-                        BoundingBoxOverlay(boxes: viewModel.boundingBoxes)
-                            .ignoresSafeArea()
+                        OverlayRenderer(
+                            overlays: viewModel.activeOverlays,
+                            instruction: viewModel.overlayInstruction
+                        )
+                        .ignoresSafeArea()
                     }
                 } else if let capturer = viewModel.arFrameCapturer {
                     ARSceneView(
-                        boxes: viewModel.boundingBoxes,
+                        overlays: viewModel.activeOverlays,
                         frameCapturer: capturer
                     )
                     .ignoresSafeArea()
+
+                    if !viewModel.overlayInstruction.isEmpty {
+                        VStack {
+                            Spacer()
+                            Text(viewModel.overlayInstruction)
+                                .font(.system(.headline, design: .rounded, weight: .bold))
+                                .foregroundStyle(.white)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 120)
+                        }
+                        .allowsHitTesting(false)
+                    }
                 }
             } else {
                 Color.black.ignoresSafeArea()
@@ -60,18 +79,15 @@ struct AssemblyView: View {
             Color.black.ignoresSafeArea()
             #endif
 
-            // MARK: - CPR Step Overlay
-            if viewModel.showCPROverlay {
-                CPRAnimationOverlay(
-                    instruction: viewModel.overlayInstruction,
-                    onDismiss: { viewModel.dismissOverlay() }
-                )
-                .ignoresSafeArea()
-                .transition(.opacity)
-                .zIndex(1)
+            // MARK: - Layer 1: Rich Animation Overlay
+            if let anim = viewModel.activeAnimation {
+                animationView(for: anim)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                    .zIndex(1)
             }
 
-            // MARK: - HUD Layer
+            // MARK: - Layer 2: HUD Controls
             VStack {
                 HStack {
                     Button {
@@ -100,20 +116,6 @@ struct AssemblyView: View {
 
                 Spacer()
 
-                // DEBUG — remove before demo
-                Button("Test CPR Overlay") {
-                    ARStepManager.shared.trigger(
-                        animation: "cpr_hands",
-                        instruction: "Place both hands on center of chest and press down"
-                    )
-                }
-                .font(.system(.caption, design: .rounded, weight: .semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(.red.opacity(0.7), in: Capsule())
-                .padding(.bottom, 8)
-
                 VoiceControlButton(
                     state: viewModel.voiceState,
                     waveformAmplitudes: viewModel.waveformAmplitudes,
@@ -125,12 +127,28 @@ struct AssemblyView: View {
         .preferredColorScheme(.dark)
         .statusBarHidden()
         .onAppear {
-            viewModel.setupStepManager()
             Task { await viewModel.detectGlasses() }
             viewModel.connectLiveKit(preferredSource: preferredCameraSource)
         }
         .onDisappear {
             viewModel.disconnectLiveKit()
+        }
+    }
+
+    // MARK: - Animation Router
+
+    @ViewBuilder
+    private func animationView(for anim: AnimationCommand) -> some View {
+        switch anim.animation {
+        case "cpr_compressions":
+            CPRAnimationOverlay(
+                instruction: anim.instruction,
+                onDismiss: { viewModel.dismissAnimation() },
+                anchorX: anim.x,
+                anchorY: anim.y
+            )
+        default:
+            EmptyView()
         }
     }
 }

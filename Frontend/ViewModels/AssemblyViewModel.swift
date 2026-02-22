@@ -45,21 +45,35 @@ final class AssemblyViewModel {
     var waveformAmplitudes: [CGFloat] = Array(repeating: 0.1, count: 7)
     private var waveformTimer: Timer?
 
-    // MARK: - AR Step Overlay
-    var showCPROverlay = false
-    var overlayInstruction: String = ""
-
     // MARK: - LiveKit
     #if canImport(UIKit)
     let liveKit = LiveKitManager()
     var arFrameCapturer: ARFrameCapturer?
     #endif
 
-    var boundingBoxes: [BoundingBox] {
+    // MARK: - Overlay State (computed from LiveKitManager)
+
+    var activeOverlays: [OverlayCommand] {
         #if canImport(UIKit)
-        liveKit.boundingBoxes
+        liveKit.activeOverlays
         #else
         []
+        #endif
+    }
+
+    var overlayInstruction: String {
+        #if canImport(UIKit)
+        liveKit.overlayInstruction
+        #else
+        ""
+        #endif
+    }
+
+    var activeAnimation: AnimationCommand? {
+        #if canImport(UIKit)
+        liveKit.activeAnimation
+        #else
+        nil
         #endif
     }
 
@@ -122,27 +136,21 @@ final class AssemblyViewModel {
         }
         #endif
     }
-    
-    // MARK: - AR Step Manager
+
+    // MARK: - Overlay Dismiss
 
     @MainActor
-    func setupStepManager() {
-        ARStepManager.shared.onStep = { [weak self] animation, instruction in
-            Task { @MainActor in
-                guard let self else { return }
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    self.overlayInstruction = instruction
-                    self.showCPROverlay = (animation == "cpr_hands")
-                }
-            }
-        }
+    func dismissAnimation() {
+        #if canImport(UIKit)
+        liveKit.activeAnimation = nil
+        #endif
     }
 
     @MainActor
-    func dismissOverlay() {
-        withAnimation(.easeInOut(duration: 0.3)) {
-            showCPROverlay = false
-        }
+    func clearOverlays() {
+        #if canImport(UIKit)
+        liveKit.clearAllOverlays()
+        #endif
     }
 
     // MARK: - Lifecycle
@@ -223,7 +231,8 @@ final class AssemblyViewModel {
         case .listening:
             voiceState = .responding
             stopWaveformAnimation()
-            liveKit.boundingBoxes = []
+            liveKit.activeOverlays = []
+            liveKit.overlayInstruction = ""
             Task { await liveKit.setMicEnabled(false) }
         case .responding:
             voiceState = .listening
