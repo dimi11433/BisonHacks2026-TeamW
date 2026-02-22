@@ -80,7 +80,7 @@ final class LiveKitManager: NSObject {
 
     // MARK: - Mic Control
     func setMicEnabled(_ enabled: Bool) async {
-        try? await room.localParticipant.setMicrophone(enabled: enabled)
+        try await room.localParticipant.setMicrophone(enabled: enabled)
     }
 
     // MARK: - Token Fetch
@@ -161,15 +161,15 @@ extension LiveKitManager: RoomDelegate {
         }
     }
 
-    nonisolated func room(_ room: Room, didDisconnectWithError error: (any Error)?) {
-        Task { @MainActor in
-            self.isConnected = false
-            self.localVideoTrack = nil as VideoTrack?
-            if let error {
-                self.connectionError = error.localizedDescription
-            }
-        }
-    }
+    // nonisolated func room(_ room: Room, didDisconnectWithError error: (any Error)?) {
+    //     Task { @MainActor in
+    //         self.isConnected = false
+    //         self.localVideoTrack = nil as VideoTrack?
+    //         if let error {
+    //             self.connectionError = error.localizedDescription
+    //         }
+    //     }
+    // }
 
     nonisolated func room(_ room: Room, participant: LocalParticipant, didPublishTrack publication: LocalTrackPublication) {
         Task { @MainActor in
