@@ -188,9 +188,6 @@ extension LiveKitManager: RoomDelegate {
         }
     }
 }
-#endif
-
-
 extension UIViewController {
     func findViewController<T: UIViewController>(ofType type: T.Type) -> T? {
         if let vc = self as? T { return vc }
@@ -203,3 +200,6 @@ extension UIViewController {
         return nil
     }
 }
+#endif
+
+
