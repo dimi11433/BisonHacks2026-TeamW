@@ -45,10 +45,28 @@ final class AssemblyViewModel {
     var waveformAmplitudes: [CGFloat] = Array(repeating: 0.1, count: 7)
     private var waveformTimer: Timer?
 
-    // MARK: - AR Step Overlay
-    var cprAnchorBox: BoundingBox? = nil   // non-nil → place USDZ model at this box
-    var stepInstruction: String = ""
-    private var stepArmed = false
+    // MARK: - AR Overlays
+    var overlays: [OverlayItem] {
+        #if canImport(UIKit)
+        liveKit.activeOverlays
+        #else
+        []
+        #endif
+    }
+    var activeAnimation: String? {
+        #if canImport(UIKit)
+        liveKit.activeAnimation
+        #else
+        nil
+        #endif
+    }
+    var animationInstruction: String {
+        #if canImport(UIKit)
+        liveKit.animationInstruction
+        #else
+        ""
+        #endif
+    }
 
     // MARK: - LiveKit
     #if canImport(UIKit)
@@ -89,11 +107,6 @@ final class AssemblyViewModel {
                 self.cameraSource = .phone
             }
         }
-        liveKit.onBoundingBoxReceived = { [weak self] in
-            guard let self, self.stepArmed, self.cprAnchorBox == nil else { return }
-            self.cprAnchorBox = self.liveKit.boundingBoxes.first
-        }
-
         let capturer = ARFrameCapturer()
         self.arFrameCapturer = capturer
 
@@ -128,29 +141,6 @@ final class AssemblyViewModel {
         #endif
     }
     
-    // MARK: - AR Step Manager
-
-    @MainActor
-    func setupStepManager() {
-        ARStepManager.shared.onStep = { [weak self] animation, instruction in
-            guard let self else { return }
-            self.stepInstruction = instruction
-            self.stepArmed = true
-            print("[AR] step armed — boxes visible: \(self.liveKit.boundingBoxes.count)")
-            // If the AI already sees something on screen, anchor immediately
-            if let box = self.liveKit.boundingBoxes.first {
-                self.cprAnchorBox = box
-            }
-        }
-    }
-
-    @MainActor
-    func dismissOverlay() {
-        cprAnchorBox = nil
-        stepInstruction = ""
-        stepArmed = false
-    }
-
     // MARK: - Lifecycle
 
     func detectGlasses() async {

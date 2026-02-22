@@ -20,14 +20,28 @@ struct AssemblyView: View {
                             .ignoresSafeArea()
                         BoundingBoxOverlay(boxes: viewModel.boundingBoxes)
                             .ignoresSafeArea()
+                        AROverlayView(
+                            overlays: viewModel.overlays,
+                            animation: viewModel.activeAnimation,
+                            animationInstruction: viewModel.animationInstruction
+                        )
+                        .ignoresSafeArea()
                     }
                 } else if let capturer = viewModel.arFrameCapturer {
-                    ARSceneView(
-                        boxes: viewModel.boundingBoxes,
-                        frameCapturer: capturer,
-                        cprAnchorBox: viewModel.cprAnchorBox
-                    )
-                    .ignoresSafeArea()
+                    ZStack {
+                        ARSceneView(
+                            boxes: viewModel.boundingBoxes,
+                            frameCapturer: capturer,
+                            cprAnimation: viewModel.activeAnimation == "cpr_compressions"
+                        )
+                        .ignoresSafeArea()
+                        AROverlayView(
+                            overlays: viewModel.overlays,
+                            animation: viewModel.activeAnimation,
+                            animationInstruction: viewModel.animationInstruction
+                        )
+                        .ignoresSafeArea()
+                    }
                 }
             } else {
                 Color.black.ignoresSafeArea()
@@ -60,32 +74,6 @@ struct AssemblyView: View {
             #else
             Color.black.ignoresSafeArea()
             #endif
-
-            // MARK: - Step Instruction Banner
-            if viewModel.cprAnchorBox != nil {
-                VStack {
-                    Spacer().frame(height: 80)
-                    HStack {
-                        Text(viewModel.stepInstruction)
-                            .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .multilineTextAlignment(.leading)
-                        Spacer()
-                        Button { viewModel.dismissOverlay() } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.title3)
-                                .foregroundStyle(.white.opacity(0.7))
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                    .padding(.horizontal, 16)
-                    Spacer()
-                }
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .zIndex(1)
-            }
 
             // MARK: - HUD Layer
             VStack {
@@ -127,7 +115,6 @@ struct AssemblyView: View {
         .preferredColorScheme(.dark)
         .statusBarHidden()
         .onAppear {
-            viewModel.setupStepManager()
             Task { await viewModel.detectGlasses() }
             viewModel.connectLiveKit(preferredSource: preferredCameraSource)
         }

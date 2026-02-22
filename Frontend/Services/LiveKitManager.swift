@@ -16,6 +16,9 @@ final class LiveKitManager: NSObject {
     var isConnected = false
     var isConnecting = false
     var boundingBoxes: [BoundingBox] = []
+    var activeOverlays: [OverlayItem] = []
+    var activeAnimation: String? = nil
+    var animationInstruction: String = ""
     var localVideoTrack: VideoTrack?
     var connectionError: String?
     var isAgentSpeaking = false
@@ -147,6 +150,9 @@ final class LiveKitManager: NSObject {
         usingGlasses = false
         localVideoTrack = nil
         boundingBoxes = []
+        activeOverlays = []
+        activeAnimation = nil
+        animationInstruction = ""
     }
 
     // MARK: - Mic Control
@@ -219,15 +225,33 @@ extension LiveKitManager: RoomDelegate {
             }
         }
 
-        if topic == "ar_step" {
-            print("[AR] ar_step received — raw: \(String(data: data, encoding: .utf8) ?? "<binary>")")
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let animation = json["animation"] as? String,
-                let instruction = json["instruction"] as? String {
-                print("[AR] parsed — animation: \(animation), instruction: \(instruction)")
-                Task { @MainActor in
-                    ARStepManager.shared.trigger(animation: animation, instruction: instruction)
+        if topic == "ar_overlay" {
+            let capturedData = data
+            Task { @MainActor in
+                guard let json = try? JSONSerialization.jsonObject(with: capturedData) as? [String: Any],
+                      let items = json["overlays"] as? [[String: Any]] else { return }
+                self.activeOverlays = items.compactMap { dict in
+                    guard let itemData = try? JSONSerialization.data(withJSONObject: dict) else { return nil }
+                    return try? JSONDecoder().decode(OverlayItem.self, from: itemData)
                 }
+            }
+        }
+
+        if topic == "ar_animation" {
+            let capturedData = data
+            Task { @MainActor in
+                guard let json = try? JSONSerialization.jsonObject(with: capturedData) as? [String: Any],
+                      let name = json["animation"] as? String else { return }
+                self.activeAnimation = name
+                self.animationInstruction = json["instruction"] as? String ?? ""
+            }
+        }
+
+        if topic == "ar_clear" {
+            Task { @MainActor in
+                self.activeOverlays = []
+                self.activeAnimation = nil
+                self.animationInstruction = ""
             }
         }
     }
@@ -247,6 +271,9 @@ extension LiveKitManager: RoomDelegate {
             self.isAgentSpeaking = isSpeaking
             if !wasSpeaking && isSpeaking {
                 self.boundingBoxes = []
+                self.activeOverlays = []
+                self.activeAnimation = nil
+                self.animationInstruction = ""
             }
             if wasSpeaking && !isSpeaking {
                 self.onAgentStoppedSpeaking?()
