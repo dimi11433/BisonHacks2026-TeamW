@@ -41,6 +41,22 @@ class ARViewController: UIViewController {
     }
     
     // Call this when JSON arrives from LiveKit
+    
+    // Call this when JSON arrives from LiveKit
+func onStepReceived(animation: String, instruction: String) {
+    DispatchQueue.main.async {
+        self.instructionLabel.text = instruction
+        self.currentAnchor?.removeFromParent()
+        
+        let model = CPROverlay.makeCPRHands()
+        
+        let anchor = AnchorEntity(world: .zero)
+        anchor.addChild(model)
+        self.arView.scene.addAnchor(anchor)
+        self.currentAnchor = anchor
+        self.bodyAnchor = anchor
+    }
+}
     func onStepReceived(animation: String, instruction: String) {
         DispatchQueue.main.async {
             self.instructionLabel.text = instruction
