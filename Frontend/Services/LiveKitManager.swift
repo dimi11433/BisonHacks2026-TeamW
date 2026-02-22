@@ -8,12 +8,9 @@ import Combine
 final class LiveKitManager: NSObject {
 
     // MARK: - Configuration
-
-    /// Point this at your token_server.py (e.g. http://<your-mac-ip>:3001)
     static let tokenServerURL = "https://f10d-138-238-254-107.ngrok-free.app"
 
     // MARK: - Public State
-
     var isConnected = false
     var isConnecting = false
     var boundingBoxes: [BoundingBox] = []
@@ -21,19 +18,16 @@ final class LiveKitManager: NSObject {
     var connectionError: String?
 
     // MARK: - Private
-
     private let room = Room()
     private var cancellables = Set<AnyCancellable>()
 
     // MARK: - Init
-
     override init() {
         super.init()
         room.add(delegate: self)
     }
 
     // MARK: - Connect
-
     func connect() async {
         guard !isConnected, !isConnecting else { return }
         isConnecting = true
@@ -75,7 +69,6 @@ final class LiveKitManager: NSObject {
     }
 
     // MARK: - Disconnect
-
     func disconnect() async {
         await room.disconnect()
         isConnected = false
@@ -84,7 +77,6 @@ final class LiveKitManager: NSObject {
     }
 
     // MARK: - Token Fetch
-
     private struct TokenResponse: Codable {
         let server_url: String
         let participant_token: String
@@ -110,9 +102,7 @@ final class LiveKitManager: NSObject {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let body: [String: String] = [
-            "participant_name": "iOS User"
-        ]
+        let body: [String: String] = ["participant_name": "iOS User"]
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await Self.localSession.data(for: request)
@@ -131,11 +121,10 @@ final class LiveKitManager: NSObject {
 }
 
 // MARK: - RoomDelegate
-
 extension LiveKitManager: RoomDelegate {
 
     nonisolated func room(_ room: Room, participant: RemoteParticipant?, didReceiveData data: Data, forTopic topic: String, encryptionType: EncryptionType) {
-    
+
         if topic == "bounding_box" {
             if let box = try? JSONDecoder().decode(BoundingBox.self, from: data) {
                 Task { @MainActor in
@@ -143,32 +132,21 @@ extension LiveKitManager: RoomDelegate {
                 }
             }
         }
-        
+
         if topic == "ar_step" {
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let animation = json["animation"] as? String,
-            let instruction = json["instruction"] as? String {
+               let animation = json["animation"] as? String,
+               let instruction = json["instruction"] as? String {
                 Task { @MainActor in
-                    // Find the ARViewController and call onStepReceived
                     if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                    let rootVC = windowScene.windows.first?.rootViewController,
-                    let arVC = rootVC.findViewController(ofType: ARViewController.self) {
+                       let rootVC = windowScene.windows.first?.rootViewController,
+                       let arVC = rootVC.findViewController(ofType: ARViewController.self) {
                         arVC.onStepReceived(animation: animation, instruction: instruction)
                     }
                 }
             }
         }
     }
-
-    // nonisolated func room(_ room: Room, participant: RemoteParticipant?, didReceiveData data: Data, forTopic topic: String, encryptionType: EncryptionType) {
-    //     guard topic == "bounding_box" else { return }
-
-    //     if let box = try? JSONDecoder().decode(BoundingBox.self, from: data) {
-    //         Task { @MainActor in
-    //             self.boundingBoxes = [box]
-    //         }
-    //     }
-    // }
 
     nonisolated func room(_ room: Room, didDisconnectWithError error: (any Error)?) {
         Task { @MainActor in
@@ -188,6 +166,8 @@ extension LiveKitManager: RoomDelegate {
         }
     }
 }
+
+// MARK: - UIViewController Helper
 extension UIViewController {
     func findViewController<T: UIViewController>(ofType type: T.Type) -> T? {
         if let vc = self as? T { return vc }
@@ -200,6 +180,5 @@ extension UIViewController {
         return nil
     }
 }
+
 #endif
-
-
