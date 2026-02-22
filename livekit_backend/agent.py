@@ -16,7 +16,9 @@ from livekit.agents import (
     get_job_context,
     room_io,
 )
-from livekit.plugins import google, silero
+from livekit.plugins import elevenlabs, google, silero
+
+import db
 
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
@@ -655,18 +657,87 @@ def prewarm(proc: JobProcess):
 server.setup_fnc = prewarm
 
 
+DEFAULT_VOICE_PROVIDER = "gemini"
+DEFAULT_GEMINI_VOICE = "Puck"
+DEFAULT_ELEVENLABS_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
+
+
+def _parse_voice_config(ctx: JobContext) -> tuple[str, str]:
+    """Extract voice provider and voice_id from room metadata set by the token server."""
+    import json as _json
+
+    raw = ctx.room.metadata or "{}"
+    try:
+        meta = _json.loads(raw)
+    except (ValueError, TypeError):
+        meta = {}
+
+    provider = meta.get("voice_provider", DEFAULT_VOICE_PROVIDER)
+    voice_id = meta.get("voice_id", DEFAULT_GEMINI_VOICE if provider == "gemini" else DEFAULT_ELEVENLABS_VOICE_ID)
+    return provider, voice_id
+
+
 @server.rtc_session(agent_name="ar-assistant")
 async def entrypoint(ctx: JobContext):
-    session = AgentSession(
-        llm=google.beta.realtime.RealtimeModel(
-            model="gemini-2.5-flash-native-audio-preview-12-2025",
-            voice="Puck",
-            temperature=0.5,
-            proactivity=True,
-            enable_affective_dialog=True,
-        ),
-        vad=ctx.proc.userdata["vad"],
+    await ctx.connect()
+
+    provider, voice_id = _parse_voice_config(ctx)
+    logger.info("Voice config: provider=%s voice_id=%s", provider, voice_id)
+
+    participant_identity = "unknown"
+    for p in ctx.room.remote_participants.values():
+        participant_identity = p.identity
+        break
+
+    session_id = await db.create_session(
+        room_name=ctx.room.name,
+        participant_identity=participant_identity,
+        voice_provider=provider,
+        voice_id=voice_id,
     )
+
+    if provider == "elevenlabs":
+        session = AgentSession(
+            llm=google.beta.realtime.RealtimeModel(
+                model="gemini-2.5-flash-preview-native-audio-dialog",
+                modalities=["TEXT"],
+                temperature=0.5,
+            ),
+            tts=elevenlabs.TTS(
+                voice_id=voice_id,
+                model="eleven_flash_v2_5",
+            ),
+            vad=ctx.proc.userdata["vad"],
+        )
+    else:
+        session = AgentSession(
+            llm=google.beta.realtime.RealtimeModel(
+                model="gemini-2.5-flash-native-audio-preview-12-2025",
+                voice=voice_id,
+                temperature=0.5,
+                proactivity=True,
+                enable_affective_dialog=True,
+            ),
+            vad=ctx.proc.userdata["vad"],
+        )
+
+    @session.on("agent_speech_committed")
+    def _on_agent_speech(msg):
+        import asyncio
+
+        text = getattr(msg, "content", str(msg))
+        asyncio.ensure_future(
+            db.log_message(session_id, role="agent", content=text)
+        )
+
+    @session.on("user_speech_committed")
+    def _on_user_speech(msg):
+        import asyncio
+
+        text = getattr(msg, "content", str(msg))
+        asyncio.ensure_future(
+            db.log_message(session_id, role="user", content=text)
+        )
 
     await session.start(
         room=ctx.room,
@@ -676,7 +747,6 @@ async def entrypoint(ctx: JobContext):
         ),
     )
 
-    await ctx.connect()
     await session.generate_reply(
         instructions="Greet the user. Say: 'I'm W Vision, your CPR coach. "
         "I can see what you see and I'll guide you through every step. "
