@@ -18,11 +18,14 @@ final class LiveKitManager: NSObject {
     var localVideoTrack: VideoTrack?
     var connectionError: String?
     var isAgentSpeaking = false
+    var usingGlasses = false
     var onAgentStoppedSpeaking: (() -> Void)?
+    var onGlassesDisconnected: (() -> Void)?
 
     // MARK: - Private
     private let room = Room()
     private var cancellables = Set<AnyCancellable>()
+    private var glassesCapturer: GlassesCapturer?
 
     // MARK: - Init
     override init() {
@@ -31,7 +34,7 @@ final class LiveKitManager: NSObject {
     }
 
     // MARK: - Connect
-    func connect() async {
+    func connect(useGlassesCamera: Bool = false) async {
         guard !isConnected, !isConnecting else { return }
         isConnecting = true
         connectionError = nil
@@ -45,20 +48,56 @@ final class LiveKitManager: NSObject {
                 url: credentials.serverURL,
                 token: credentials.token
             )
-            print("[LiveKit] Room connected. Enabling camera...")
+            print("[LiveKit] Room connected. Setting up camera...")
 
-            try await room.localParticipant.setCamera(enabled: true, captureOptions: CameraCaptureOptions(position: .back))
-            print("[LiveKit] Camera enabled. Enabling mic...")
+            if useGlassesCamera {
+                let capturer = GlassesCapturer()
+                capturer.onDisconnected = { [weak self] in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        print("[LiveKit] Glasses disconnected, falling back to iPhone camera")
+                        self.usingGlasses = false
+                        self.glassesCapturer = nil
+                        _ = try? await self.room.localParticipant.setCamera(
+                            enabled: true,
+                            captureOptions: CameraCaptureOptions(position: .back)
+                        )
+                        self.onGlassesDisconnected?()
+                    }
+                }
+                let started = await capturer.start()
+                if started {
+                    try await room.localParticipant.publish(videoTrack: capturer.videoTrack)
+                    localVideoTrack = capturer.videoTrack
+                    glassesCapturer = capturer
+                    usingGlasses = true
+                    print("[LiveKit] Glasses camera published.")
+                } else {
+                    print("[LiveKit] Glasses failed, falling back to iPhone camera")
+                    try await room.localParticipant.setCamera(
+                        enabled: true,
+                        captureOptions: CameraCaptureOptions(position: .back)
+                    )
+                    usingGlasses = false
+                }
+            } else {
+                try await room.localParticipant.setCamera(
+                    enabled: true,
+                    captureOptions: CameraCaptureOptions(position: .back)
+                )
+                usingGlasses = false
+            }
+
+            print("[LiveKit] Camera ready. Enabling mic...")
 
             try await room.localParticipant.setMicrophone(enabled: true)
             print("[LiveKit] Mic enabled. Checking video tracks...")
 
-            if let pub = room.localParticipant.localVideoTracks.first,
+            if localVideoTrack == nil,
+               let pub = room.localParticipant.localVideoTracks.first,
                let videoTrack = pub.track as? VideoTrack {
                 localVideoTrack = videoTrack
                 print("[LiveKit] Local video track set.")
-            } else {
-                print("[LiveKit] No local video track found yet, waiting for delegate.")
             }
 
             isConnected = true
@@ -73,8 +112,13 @@ final class LiveKitManager: NSObject {
 
     // MARK: - Disconnect
     func disconnect() async {
+        if let capturer = glassesCapturer {
+            await capturer.stop()
+            glassesCapturer = nil
+        }
         await room.disconnect()
         isConnected = false
+        usingGlasses = false
         localVideoTrack = nil
         boundingBoxes = []
     }

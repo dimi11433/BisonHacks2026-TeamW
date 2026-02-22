@@ -7,8 +7,8 @@ struct HomeView: View {
     @State private var logoOpacity: Double = 0
     @State private var contentOpacity: Double = 0
     @State private var buttonOffset: CGFloat = 30
-    @State private var pulseRing: CGFloat = 1.0
     @State private var glassesDetected = false
+    @State private var devicesListenerToken: (any AnyListenerToken)?
     
     private let cyan = Color(hex: 0x00FFFF)
     
@@ -29,46 +29,32 @@ struct HomeView: View {
                 .opacity(0.04)
                 .ignoresSafeArea()
             
+            FloatingParticlesView()
+                .ignoresSafeArea()
+            
             VStack(spacing: 0) {
                 Spacer()
                 
                 // MARK: - Logo + Branding
-                VStack(spacing: 20) {
-                    ZStack {
-                        Circle()
-                            .stroke(cyan.opacity(0.08), lineWidth: 1)
-                            .frame(width: 160, height: 160)
-                            .scaleEffect(pulseRing)
-                        
-                        Circle()
-                            .stroke(cyan.opacity(0.05), lineWidth: 1)
-                            .frame(width: 200, height: 200)
-                            .scaleEffect(pulseRing * 0.95)
-                        
-                        Circle()
-                            .fill(.ultraThinMaterial)
-                            .frame(width: 100, height: 100)
-                            .overlay(
-                                Circle()
-                                    .stroke(cyan.opacity(0.3), lineWidth: 1)
-                            )
-                            .shadow(color: cyan.opacity(0.2), radius: 20)
-                        
-                        Image(systemName: "eye.trianglebadge.exclamationmark")
-                            .font(.system(size: 36, weight: .light, design: .rounded))
-                            .foregroundStyle(cyan)
-                    }
-                    .scaleEffect(logoScale)
-                    .opacity(logoOpacity)
+                VStack(spacing: 24) {
+                    WLogoView()
+                        .scaleEffect(logoScale)
+                        .opacity(logoOpacity)
                     
                     VStack(spacing: 8) {
-                        Text("Spatial")
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
+                        Text("W")
+                            .font(.system(size: 40, weight: .black, design: .rounded))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [.white, cyan],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
                         +
-                        Text(" Assistant")
-                            .font(.system(size: 28, weight: .light, design: .rounded))
-                            .foregroundStyle(cyan)
+                        Text(" Vision")
+                            .font(.system(size: 40, weight: .ultraLight, design: .rounded))
+                            .foregroundStyle(cyan.opacity(0.8))
                         
                         Text("See it. Ask it. Know it.")
                             .font(.system(.subheadline, design: .rounded, weight: .medium))
@@ -167,23 +153,39 @@ struct HomeView: View {
                 contentOpacity = 1
                 buttonOffset = 0
             }
-            withAnimation(.easeInOut(duration: 2.5).repeatForever(autoreverses: true)) {
-                pulseRing = 1.08
+            startGlassesDetection()
+        }
+        .onDisappear {
+            Task {
+                await devicesListenerToken?.cancel()
+                devicesListenerToken = nil
             }
-            checkForGlasses()
         }
     }
     
-    private func checkForGlasses() {
+    private func startGlassesDetection() {
         let wearables = Wearables.shared
-        let deviceIds = wearables.devices
+        
+        updateGlassesState(deviceIds: wearables.devices, wearables: wearables)
+        
+        devicesListenerToken = wearables.addDevicesListener { ids in
+            Task { @MainActor in
+                self.updateGlassesState(deviceIds: ids, wearables: wearables)
+            }
+        }
+    }
+    
+    private func updateGlassesState(deviceIds: [String], wearables: any WearablesInterface) {
         if let firstId = deviceIds.first,
            let device = wearables.deviceForIdentifier(firstId) {
+            let connected = device.linkState == .connected
             withAnimation(.easeInOut(duration: 0.3)) {
-                glassesDetected = (device.linkState == .connected)
+                glassesDetected = connected
             }
         } else {
-            glassesDetected = false
+            withAnimation(.easeInOut(duration: 0.3)) {
+                glassesDetected = false
+            }
         }
     }
 }

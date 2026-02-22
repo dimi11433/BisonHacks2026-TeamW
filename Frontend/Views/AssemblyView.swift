@@ -68,7 +68,10 @@ struct AssemblyView: View {
                     Spacer()
 
                     #if canImport(UIKit)
-                    ConnectionPill(isConnected: viewModel.liveKit.isConnected)
+                    ConnectionPill(
+                        isConnected: viewModel.liveKit.isConnected,
+                        usingGlasses: viewModel.liveKit.usingGlasses
+                    )
                     #endif
                 }
                 .padding(.horizontal, 16)
@@ -87,8 +90,10 @@ struct AssemblyView: View {
         .preferredColorScheme(.dark)
         .statusBarHidden()
         .onAppear {
-            viewModel.detectGlasses()
-            viewModel.connectLiveKit()
+            Task {
+                await viewModel.detectGlasses()
+                viewModel.connectLiveKit()
+            }
         }
         .onDisappear {
             viewModel.disconnectLiveKit()
@@ -100,6 +105,7 @@ struct AssemblyView: View {
 
 private struct ConnectionPill: View {
     let isConnected: Bool
+    var usingGlasses: Bool = false
     private let cyan = Color(hex: 0x00FFFF)
 
     var body: some View {
@@ -108,9 +114,20 @@ private struct ConnectionPill: View {
                 .fill(isConnected ? Color.green : Color.orange)
                 .frame(width: 6, height: 6)
 
-            Text(isConnected ? "Live" : "Connecting")
-                .font(.system(.caption2, design: .rounded, weight: .medium))
-                .foregroundStyle(.white.opacity(0.7))
+            if isConnected {
+                if usingGlasses {
+                    Image(systemName: "eyeglasses")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                Text(usingGlasses ? "Live \u{2022} Glasses" : "Live \u{2022} iPhone")
+                    .font(.system(.caption2, design: .rounded, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+            } else {
+                Text("Connecting")
+                    .font(.system(.caption2, design: .rounded, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)

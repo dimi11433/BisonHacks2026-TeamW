@@ -77,8 +77,15 @@ final class AssemblyViewModel {
                 await self.liveKit.setMicEnabled(true)
             }
         }
+        liveKit.onGlassesDisconnected = { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                self.cameraSource = .phone
+            }
+        }
+        let useGlasses = cameraSource == .glasses
         Task {
-            await liveKit.connect()
+            await liveKit.connect(useGlassesCamera: useGlasses)
             await MainActor.run {
                 startWaveformAnimation()
             }
@@ -96,10 +103,14 @@ final class AssemblyViewModel {
     
     // MARK: - Lifecycle
     
-    func detectGlasses() {
+    func detectGlasses() async {
         isDetectingGlasses = true
         
         let wearables = Wearables.shared
+        
+        // Give the SDK a moment to discover devices
+        try? await Task.sleep(for: .milliseconds(500))
+        
         let deviceIds = wearables.devices
         
         if let firstId = deviceIds.first,
