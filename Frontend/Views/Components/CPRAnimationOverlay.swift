@@ -8,29 +8,26 @@ struct CPRAnimationOverlay: View {
     let onDismiss: () -> Void
 
     @State private var compressionCount = 0
-
-    // 100 BPM = one compression every 0.6 seconds
     private let compressionTimer = Timer.publish(every: 0.6, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // Dark gradient rising from bottom so overlay is readable over any camera feed
             LinearGradient(
-                colors: [.clear, .black.opacity(0.8)],
+                colors: [.clear, .black.opacity(0.88)],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: 420)
+            .frame(height: 460)
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Dismiss button
+                // Dismiss
                 HStack {
                     Spacer()
                     Button(action: onDismiss) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 26))
-                            .foregroundStyle(.white.opacity(0.65))
+                            .foregroundStyle(.white.opacity(0.6))
                     }
                 }
                 .padding(.horizontal, 24)
@@ -47,23 +44,24 @@ struct CPRAnimationOverlay: View {
                     .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
                     .padding(.horizontal, 20)
 
-                Spacer().frame(height: 20)
+                Spacer().frame(height: 22)
 
-                // Animated CPR scene — TimelineView gives smooth, state-free animation
+                // Animated CPR scene — TimelineView drives smooth frame-rate animation
                 TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
                     let elapsed = timeline.date.timeIntervalSinceReferenceDate
-                    let phase = elapsed.truncatingRemainder(dividingBy: 0.6) / 0.6
-                    let offset = CGFloat(compressionCurve(phase: phase)) * 44
+                    let phase  = elapsed.truncatingRemainder(dividingBy: 0.6) / 0.6
+                    let offset = CGFloat(compressionCurve(phase: phase)) * 52
+                    let aAlpha = arrowAlpha(phase: phase)
 
-                    CPRSceneView(handsOffset: offset)
+                    CPRScene(handsOffset: offset, arrowAlpha: aAlpha)
                 }
-                .frame(height: 170)
+                .frame(height: 195)
 
-                Spacer().frame(height: 18)
+                Spacer().frame(height: 16)
 
-                // Stats row
-                HStack(spacing: 22) {
-                    HStack(spacing: 7) {
+                // BPM + counter row
+                HStack(spacing: 20) {
+                    HStack(spacing: 6) {
                         Image(systemName: "heart.fill")
                             .foregroundStyle(.red)
                         Text("100 BPM")
@@ -72,17 +70,17 @@ struct CPRAnimationOverlay: View {
                     }
 
                     Rectangle()
-                        .fill(.white.opacity(0.25))
-                        .frame(width: 1, height: 16)
+                        .fill(.white.opacity(0.2))
+                        .frame(width: 1, height: 14)
 
                     Text("\(compressionCount) compressions")
                         .font(.system(.subheadline, design: .rounded, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.8))
+                        .foregroundStyle(.white.opacity(0.75))
                         .contentTransition(.numericText())
                         .animation(.linear(duration: 0.1), value: compressionCount)
                 }
 
-                Spacer().frame(height: 110) // clear of VoiceControlButton
+                Spacer().frame(height: 110)
             }
         }
         .onReceive(compressionTimer) { _ in
@@ -90,107 +88,104 @@ struct CPRAnimationOverlay: View {
         }
     }
 
-    // Returns 0.0 (hands up) → 1.0 (hands fully pressed) for a given cycle phase.
-    // Shape: quick press down, brief hold, controlled release, short pause.
+    // Quick press (ease-in quadratic), hold, linear release, short pause
     private func compressionCurve(phase: Double) -> Double {
-        let pressEnd   = 0.35  // first 35% — press down
-        let holdEnd    = 0.50  // next 15% — hold at bottom
-        let releaseEnd = 0.85  // next 35% — release up
-
-        if phase < pressEnd {
-            // Ease-in quadratic for a quick, snappy press
-            let t = phase / pressEnd
-            return t * t
-        } else if phase < holdEnd {
+        if phase < 0.35 {
+            let t = phase / 0.35; return t * t
+        } else if phase < 0.50 {
             return 1.0
-        } else if phase < releaseEnd {
-            let t = (phase - holdEnd) / (releaseEnd - holdEnd)
-            return 1.0 - t
-        } else {
-            return 0.0  // pause at top before next compression
+        } else if phase < 0.85 {
+            return 1.0 - (phase - 0.50) / 0.35
         }
+        return 0.0
+    }
+
+    // Arrows brighten on the downstroke, fade after release
+    private func arrowAlpha(phase: Double) -> Double {
+        if phase < 0.35 { return phase / 0.35 }
+        if phase < 0.55 { return 1.0 }
+        return max(0, 1.0 - (phase - 0.55) / 0.30)
     }
 }
 
-// MARK: - CPR Scene
+// MARK: - Scene
 
-private struct CPRSceneView: View {
+private struct CPRScene: View {
     let handsOffset: CGFloat
+    let arrowAlpha: Double
 
     var body: some View {
-        ZStack {
-            // Person silhouette
+        ZStack(alignment: .center) {
+
+            // Person torso outline
             VStack(spacing: 0) {
-                Circle()
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(.white.opacity(0.18), lineWidth: 1.2)
+                    .frame(width: 28, height: 16)          // neck hint
+
+                RoundedRectangle(cornerRadius: 20)
                     .stroke(.white.opacity(0.28), lineWidth: 1.5)
-                    .frame(width: 36, height: 36)
-
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(.white.opacity(0.06))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(.white.opacity(0.22), lineWidth: 1.5)
-                    )
-                    .frame(width: 130, height: 90)
+                    .frame(width: 164, height: 80)         // chest
             }
-            .offset(y: 8)
+            .offset(y: 44)
 
-            // Red target spot on sternum
+            // Red sternum target
             Circle()
-                .fill(.red.opacity(0.65))
-                .frame(width: 20, height: 20)
-                .offset(y: 28)
+                .fill(.red.opacity(0.7))
+                .frame(width: 12, height: 12)
+                .offset(y: 40)
 
-            // Stacked hands that move down with handsOffset
-            VStack(spacing: -5) {
-                CPRHandView(opacity: 1.0)
-                CPRHandView(opacity: 0.72)
-            }
-            .offset(y: -14 + handsOffset)
-
-            // Depth indicator on the right
-            VStack(spacing: 5) {
-                ZStack(alignment: .bottom) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(.white.opacity(0.12))
-                        .frame(width: 8, height: 54)
-
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(handsOffset > 35 ? Color.green : Color.orange)
-                        .frame(width: 8, height: max(2, handsOffset / 44 * 54))
+            // Downward arrows — fade in on press, fade out on release
+            VStack(spacing: 6) {
+                ForEach(0..<3, id: \.self) { i in
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.cyan)
+                        .opacity(arrowAlpha * max(0.2, 1.0 - Double(i) * 0.3))
                 }
+            }
+            .offset(y: -76 + handsOffset * 0.35)
+            .opacity(arrowAlpha)
 
-                Text("depth")
-                    .font(.system(.caption2, design: .rounded))
+            // Speed lines beside the hands during downstroke
+            Canvas { ctx, size in
+                let alpha = arrowAlpha * 0.4
+                guard alpha > 0.02 else { return }
+                let lc = GraphicsContext.Shading.color(.white.opacity(alpha))
+                let cx = size.width / 2
+                let pairs: [(CGFloat, CGFloat, CGFloat)] = [
+                    (-58,  8, 18),
+                    (-44,  4, 14),
+                    ( 44,  4, 14),
+                    ( 58,  8, 18),
+                ]
+                for (xOff, yStart, yEnd) in pairs {
+                    var p = Path()
+                    p.move(to:    CGPoint(x: cx + xOff, y: yStart))
+                    p.addLine(to: CGPoint(x: cx + xOff, y: yEnd))
+                    ctx.stroke(p, with: lc, lineWidth: 1.8)
+                }
+            }
+            .frame(width: 180, height: 30)
+            .offset(y: -18 + handsOffset + 28)
+
+            // Stacked hands — line-art SF Symbols, animate down with compression
+            ZStack {
+                // Bottom hand — dimmer, slightly smaller for depth
+                Image(systemName: "hand.raised")
+                    .font(.system(size: 60, weight: .ultraLight))
                     .foregroundStyle(.white.opacity(0.45))
+                    .rotationEffect(.degrees(180))
+                    .scaleEffect(0.9)
+                    .offset(x: 2, y: 7)
+
+                // Top hand — bright
+                Image(systemName: "hand.raised")
+                    .font(.system(size: 60, weight: .ultraLight))
+                    .foregroundStyle(.white)
+                    .rotationEffect(.degrees(180))
             }
-            .offset(x: 96, y: 8)
+            .offset(y: -20 + handsOffset)
         }
-    }
-}
-
-// MARK: - Hand Shape
-
-private struct CPRHandView: View {
-    let opacity: Double
-
-    var body: some View {
-        ZStack(alignment: .top) {
-            // Palm
-            RoundedRectangle(cornerRadius: 7)
-                .fill(.white.opacity(opacity))
-                .frame(width: 72, height: 22)
-                .offset(y: 14)
-
-            // Four fingers
-            HStack(spacing: 4) {
-                ForEach(0..<4, id: \.self) { _ in
-                    Capsule()
-                        .fill(.white.opacity(opacity))
-                        .frame(width: 12, height: 17)
-                }
-            }
-        }
-        .frame(width: 72, height: 36)
     }
 }
