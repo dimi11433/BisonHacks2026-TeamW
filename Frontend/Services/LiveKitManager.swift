@@ -148,7 +148,7 @@ extension LiveKitManager: RoomDelegate {
         }
     }
 
-    nonisolated func room(_ room: Room, didDisconnectWithError error: (any Error)?) {
+    nonisolated func room(_ room: Room, didDisconnect disconnectReason: DisconnectReason?) {
         Task { @MainActor in
             self.isConnected = false
             self.localVideoTrack = nil as VideoTrack?
@@ -158,7 +158,7 @@ extension LiveKitManager: RoomDelegate {
         }
     }
 
-    nonisolated func room(_ room: Room, localParticipant: LocalParticipant, didPublishTrack publication: LocalTrackPublication) {
+    nonisolated func room(_ room: Room, participant: LocalParticipant, didPublishTrack publication: LocalTrackPublication) {
         if let videoTrack = publication.track as? VideoTrack {
             Task { @MainActor in
                 self.localVideoTrack = videoTrack
