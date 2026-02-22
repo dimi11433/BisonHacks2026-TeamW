@@ -73,7 +73,7 @@ struct HomeView: View {
                 }
                 
                 Spacer().frame(height: 30)
-
+                
                 // MARK: - Status Cards
                 VStack(spacing: 12) {
                     Button {

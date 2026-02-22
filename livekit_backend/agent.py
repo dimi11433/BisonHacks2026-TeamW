@@ -129,8 +129,8 @@ server = AgentServer()
 
 def prewarm(proc: JobProcess):
     proc.userdata["vad"] = silero.VAD.load(
-        activation_threshold=0.65,
-        min_silence_duration=0.5,
+        activation_threshold=0.6,
+        min_silence_duration=0.3,
     )
 
 
@@ -143,7 +143,7 @@ async def entrypoint(ctx: JobContext):
         llm=google.beta.realtime.RealtimeModel(
             model="gemini-2.5-flash-native-audio-preview-12-2025",
             voice="Puck",
-            temperature=0.7,
+            temperature=0.5,
             proactivity=True,
             enable_affective_dialog=True,
         ),

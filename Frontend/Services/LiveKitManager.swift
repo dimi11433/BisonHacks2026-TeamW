@@ -9,7 +9,8 @@ import UIKit
 final class LiveKitManager: NSObject {
 
     // MARK: - Configuration
-    static let tokenServerURL = "https://f10d-138-238-254-107.ngrok-free.app"
+    // Update this after starting ngrok: `ngrok http 3001`
+    static var tokenServerURL = "https://f10d-138-238-254-107.ngrok-free.app"
 
     // MARK: - Public State
     var isConnected = false
@@ -34,7 +35,7 @@ final class LiveKitManager: NSObject {
     }
 
     // MARK: - Connect
-    func connect(useGlassesCamera: Bool = false) async {
+    func connect(useGlassesCamera: Bool = false, skipCamera: Bool = false) async {
         guard !isConnected, !isConnecting else { return }
         isConnecting = true
         connectionError = nil
@@ -50,7 +51,9 @@ final class LiveKitManager: NSObject {
             )
             print("[LiveKit] Room connected. Setting up camera...")
 
-            if useGlassesCamera {
+            if skipCamera {
+                print("[LiveKit] Skipping built-in camera (ARView will provide frames).")
+            } else if useGlassesCamera {
                 let capturer = GlassesCapturer()
                 capturer.onDisconnected = { [weak self] in
                     Task { @MainActor in
@@ -125,6 +128,13 @@ final class LiveKitManager: NSObject {
         isConnecting = false
     }
 
+    // MARK: - Publish External Video Track (e.g. from ARSession)
+    func publishExternalTrack(_ track: LocalVideoTrack) async throws {
+        try await room.localParticipant.publish(videoTrack: track)
+        localVideoTrack = track
+        print("[LiveKit] External video track published.")
+    }
+
     // MARK: - Disconnect
     func disconnect() async {
         if let capturer = glassesCapturer {
@@ -161,6 +171,9 @@ final class LiveKitManager: NSObject {
     private static let localSession: URLSession = {
         let config = URLSessionConfiguration.default
         config.connectionProxyDictionary = [:]
+        config.timeoutIntervalForRequest = 10
+        config.timeoutIntervalForResource = 15
+        config.waitsForConnectivity = false
         return URLSession(configuration: config)
     }()
 
@@ -200,7 +213,7 @@ extension LiveKitManager: RoomDelegate {
             let capturedData = data
             Task { @MainActor in
                 guard let box = try? JSONDecoder().decode(BoundingBox.self, from: capturedData) else { return }
-                self.boundingBoxes = [box]
+                self.boundingBoxes.append(box)
             }
         }
 
@@ -228,6 +241,9 @@ extension LiveKitManager: RoomDelegate {
         Task { @MainActor in
             let wasSpeaking = self.isAgentSpeaking
             self.isAgentSpeaking = isSpeaking
+            if !wasSpeaking && isSpeaking {
+                self.boundingBoxes = []
+            }
             if wasSpeaking && !isSpeaking {
                 self.onAgentStoppedSpeaking?()
             }

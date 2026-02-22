@@ -1,7 +1,7 @@
 import Foundation
 
 @MainActor
-class ARStepManager: ObservableObject {
+class ARStepManager {
     static let shared = ARStepManager()
     var onStep: ((String, String) -> Void)?
     
