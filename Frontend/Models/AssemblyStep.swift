@@ -10,26 +10,20 @@ struct AssemblyStep: Identifiable {
 }
 
 enum VoiceTriggerState {
-    case idle
     case listening
-    case processing
-    case speaking
+    case responding
     
     var label: String {
         switch self {
-        case .idle:       return "Tap to speak"
-        case .listening:  return "Listening..."
-        case .processing: return "Processing..."
-        case .speaking:   return "Speaking..."
+        case .listening:  return "Listening"
+        case .responding: return "Interrupt"
         }
     }
     
     var icon: String {
         switch self {
-        case .idle:       return "mic.fill"
-        case .listening:  return "waveform"
-        case .processing: return "ellipsis.circle.fill"
-        case .speaking:   return "speaker.wave.3.fill"
+        case .listening:  return "stop.fill"
+        case .responding: return "hand.raised.fill"
         }
     }
 }
