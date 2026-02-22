@@ -193,14 +193,10 @@ extension LiveKitManager: RoomDelegate {
 
         if topic == "ar_step" {
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let animation = json["animation"] as? String,
-               let instruction = json["instruction"] as? String {
+                let animation = json["animation"] as? String,
+                let instruction = json["instruction"] as? String {
                 Task { @MainActor in
-                    NotificationCenter.default.post(
-                        name: NSNotification.Name("ARStep"),
-                        object: nil,
-                        userInfo: ["animation": animation, "instruction": instruction]
-                    )
+                    ARStepManager.shared.trigger(animation: animation, instruction: instruction)
                 }
             }
         }

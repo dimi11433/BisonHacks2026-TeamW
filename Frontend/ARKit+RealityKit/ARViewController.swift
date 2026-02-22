@@ -10,6 +10,9 @@ class ARViewController: UIViewController, ARSessionDelegate {
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        ARStepManager.shared.onStep = { [weak self] animation, instruction in
+            self?.onStepReceived(animation: animation, instruction: instruction)
+        }
         
         // Set up AR view
         arView = ARView(frame: view.bounds)
