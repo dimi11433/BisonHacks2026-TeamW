@@ -69,14 +69,19 @@ final class AssemblyViewModel {
     func connectLiveKit() {
         #if canImport(UIKit)
         liveKit.onAgentStoppedSpeaking = { [weak self] in
-            guard let self, self.voiceState == .responding else { return }
-            self.voiceState = .listening
-            self.startWaveformAnimation()
-            Task { await self.liveKit.setMicEnabled(true) }
+            guard let self else { return }
+            Task { @MainActor in
+                guard self.voiceState == .responding else { return }
+                self.voiceState = .listening
+                self.startWaveformAnimation()
+                await self.liveKit.setMicEnabled(true)
+            }
         }
         Task {
             await liveKit.connect()
-            startWaveformAnimation()
+            await MainActor.run {
+                startWaveformAnimation()
+            }
         }
         #endif
     }
