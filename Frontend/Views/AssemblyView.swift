@@ -24,7 +24,8 @@ struct AssemblyView: View {
                 } else if let capturer = viewModel.arFrameCapturer {
                     ARSceneView(
                         boxes: viewModel.boundingBoxes,
-                        frameCapturer: capturer
+                        frameCapturer: capturer,
+                        cprAnchorBox: viewModel.cprAnchorBox
                     )
                     .ignoresSafeArea()
                 }
@@ -60,14 +61,29 @@ struct AssemblyView: View {
             Color.black.ignoresSafeArea()
             #endif
 
-            // MARK: - CPR Step Overlay
-            if viewModel.showCPROverlay {
-                CPRAnimationOverlay(
-                    instruction: viewModel.overlayInstruction,
-                    onDismiss: { viewModel.dismissOverlay() }
-                )
-                .ignoresSafeArea()
-                .transition(.opacity)
+            // MARK: - Step Instruction Banner
+            if viewModel.cprAnchorBox != nil {
+                VStack {
+                    Spacer().frame(height: 80)
+                    HStack {
+                        Text(viewModel.stepInstruction)
+                            .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.leading)
+                        Spacer()
+                        Button { viewModel.dismissOverlay() } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .padding(.horizontal, 16)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
                 .zIndex(1)
             }
 

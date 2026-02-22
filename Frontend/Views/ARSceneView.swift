@@ -9,6 +9,7 @@ struct ARSceneView: UIViewRepresentable {
 
     let boxes: [BoundingBox]
     let frameCapturer: ARFrameCapturer
+    var cprAnchorBox: BoundingBox?   // when set, loads cpr_hands.usdz at that position
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -49,6 +50,13 @@ struct ARSceneView: UIViewRepresentable {
         for box in boxes where newIDs.contains(box.id) {
             coordinator.placeBox(box, in: arView)
         }
+
+        // CPR model
+        if let box = cprAnchorBox {
+            coordinator.placeCPRModel(for: box, in: arView)
+        } else {
+            coordinator.removeCPRModel(from: arView)
+        }
     }
 
     // MARK: - Coordinator
@@ -57,6 +65,10 @@ struct ARSceneView: UIViewRepresentable {
         weak var arView: ARView?
         private var anchors: [String: AnchorEntity] = [:]
         var placedBoxIDs: [String] { Array(anchors.keys) }
+
+        // CPR USDZ model state
+        private var cprAnchor: AnchorEntity?
+        private var placedCPRBoxID: String?
 
         private let cyan = UIColor(red: 0, green: 1, blue: 1, alpha: 1)
 
@@ -233,6 +245,77 @@ struct ARSceneView: UIViewRepresentable {
 
             let m = simd_float3x3(columns: (right, up, forward))
             return simd_quatf(m)
+        }
+
+        // MARK: - CPR USDZ Model
+
+        func placeCPRModel(for box: BoundingBox, in arView: ARView) {
+            guard placedCPRBoxID != box.id else { return }   // already placed for this box
+            removeCPRModel(from: arView)
+            placedCPRBoxID = box.id
+
+            let bounds = arView.bounds
+            guard bounds.width > 0, bounds.height > 0 else { return }
+
+            let cx = CGFloat((box.x_min + box.x_max) / 2) * bounds.width
+            let cy = CGFloat((box.y_min + box.y_max) / 2) * bounds.height
+            let screen = CGPoint(x: cx, y: cy)
+
+            // Raycast to find real-world position; fall back to 1.2 m in front of camera
+            let worldPos: SIMD3<Float>
+            if let hit = arView.raycast(from: screen, allowing: .estimatedPlane, alignment: .any).first {
+                worldPos = SIMD3(hit.worldTransform.columns.3.x,
+                                 hit.worldTransform.columns.3.y,
+                                 hit.worldTransform.columns.3.z)
+            } else if let ray = arView.ray(through: screen) {
+                worldPos = ray.origin + ray.direction * 1.2
+            } else {
+                return
+            }
+
+            Task.detached(priority: .userInitiated) {
+                do {
+                    let entity = try Entity.load(named: "cpr_hands")
+
+                    // Play built-in animation if the USDZ includes one
+                    if let anim = entity.availableAnimations.first {
+                        entity.playAnimation(anim.repeat())
+                    } else {
+                        // Fallback: pump the model up and down at CPR rhythm
+                        var pushed = entity.transform
+                        pushed.translation.y -= 0.05
+                        let pump = FromToByAnimation<Transform>(
+                            from: entity.transform,
+                            to: pushed,
+                            duration: 0.3,
+                            timing: .easeInOut,
+                            bindTarget: .transform,
+                            repeatMode: .autoReverse
+                        )
+                        if let res = try? AnimationResource.generate(with: pump) {
+                            entity.playAnimation(res.repeat())
+                        }
+                    }
+
+                    await MainActor.run {
+                        let anchor = AnchorEntity(world: worldPos)
+                        anchor.addChild(entity)
+                        arView.scene.addAnchor(anchor)
+                        self.cprAnchor = anchor
+                        print("[CPR] cpr_hands.usdz placed at \(worldPos)")
+                    }
+                } catch {
+                    print("[CPR] Failed to load cpr_hands.usdz — make sure it's added to the Xcode target: \(error)")
+                }
+            }
+        }
+
+        func removeCPRModel(from arView: ARView) {
+            if let anchor = cprAnchor {
+                arView.scene.removeAnchor(anchor)
+                cprAnchor = nil
+            }
+            placedCPRBoxID = nil
         }
     }
 }

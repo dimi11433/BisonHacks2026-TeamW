@@ -46,9 +46,9 @@ final class AssemblyViewModel {
     private var waveformTimer: Timer?
 
     // MARK: - AR Step Overlay
-    var showCPROverlay = false
-    var overlayInstruction: String = ""
-    private var stepArmed = false   // true once ar_step has been received
+    var cprAnchorBox: BoundingBox? = nil   // non-nil → place USDZ model at this box
+    var stepInstruction: String = ""
+    private var stepArmed = false
 
     // MARK: - LiveKit
     #if canImport(UIKit)
@@ -90,11 +90,8 @@ final class AssemblyViewModel {
             }
         }
         liveKit.onBoundingBoxReceived = { [weak self] in
-            // ar_step arms the instruction; bounding box detection fires the overlay
-            guard let self, self.stepArmed else { return }
-            withAnimation(.easeInOut(duration: 0.3)) {
-                self.showCPROverlay = true
-            }
+            guard let self, self.stepArmed, self.cprAnchorBox == nil else { return }
+            self.cprAnchorBox = self.liveKit.boundingBoxes.first
         }
 
         let capturer = ARFrameCapturer()
@@ -137,24 +134,20 @@ final class AssemblyViewModel {
     func setupStepManager() {
         ARStepManager.shared.onStep = { [weak self] animation, instruction in
             guard let self else { return }
-            // Arm: store the instruction and wait for a bounding box to show the overlay.
-            // If the AI already sees something (boxes present), show immediately.
-            self.overlayInstruction = instruction
+            self.stepInstruction = instruction
             self.stepArmed = true
-            print("[AR] step armed — instruction: \(instruction), boxes: \(self.liveKit.boundingBoxes.count)")
-            if !self.liveKit.boundingBoxes.isEmpty {
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    self.showCPROverlay = true
-                }
+            print("[AR] step armed — boxes visible: \(self.liveKit.boundingBoxes.count)")
+            // If the AI already sees something on screen, anchor immediately
+            if let box = self.liveKit.boundingBoxes.first {
+                self.cprAnchorBox = box
             }
         }
     }
 
     @MainActor
     func dismissOverlay() {
-        withAnimation(.easeInOut(duration: 0.3)) {
-            showCPROverlay = false
-        }
+        cprAnchorBox = nil
+        stepInstruction = ""
         stepArmed = false
     }
 
