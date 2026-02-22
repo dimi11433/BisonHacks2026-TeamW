@@ -50,6 +50,21 @@ struct AssemblyView: View {
             Color.black.ignoresSafeArea()
             #endif
 
+            // MARK: - Bounding Box Overlay
+            BoundingBoxOverlay(boxes: viewModel.boundingBoxes)
+                .ignoresSafeArea()
+
+            // MARK: - CPR Step Overlay
+            if viewModel.showCPROverlay {
+                CPRAnimationOverlay(
+                    instruction: viewModel.overlayInstruction,
+                    onDismiss: { viewModel.dismissOverlay() }
+                )
+                .ignoresSafeArea()
+                .transition(.opacity)
+                .zIndex(1)
+            }
+
             // MARK: - HUD Layer
             VStack {
                 HStack {
@@ -90,6 +105,7 @@ struct AssemblyView: View {
         .preferredColorScheme(.dark)
         .statusBarHidden()
         .onAppear {
+            viewModel.setupStepManager()
             Task {
                 await viewModel.detectGlasses()
                 viewModel.connectLiveKit()
