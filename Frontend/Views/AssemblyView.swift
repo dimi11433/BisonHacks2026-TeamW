@@ -90,6 +90,20 @@ struct AssemblyView: View {
 
                 Spacer()
 
+                // DEBUG — remove before demo
+                Button("Test CPR Overlay") {
+                    ARStepManager.shared.trigger(
+                        animation: "cpr_hands",
+                        instruction: "Place both hands on center of chest and press down"
+                    )
+                }
+                .font(.system(.caption, design: .rounded, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.red.opacity(0.7), in: Capsule())
+                .padding(.bottom, 8)
+
                 VoiceControlButton(
                     state: viewModel.voiceState,
                     waveformAmplitudes: viewModel.waveformAmplitudes,

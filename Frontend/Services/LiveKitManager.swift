@@ -218,9 +218,11 @@ extension LiveKitManager: RoomDelegate {
         }
 
         if topic == "ar_step" {
+            print("[AR] ar_step received — raw: \(String(data: data, encoding: .utf8) ?? "<binary>")")
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                 let animation = json["animation"] as? String,
                 let instruction = json["instruction"] as? String {
+                print("[AR] parsed — animation: \(animation), instruction: \(instruction)")
                 Task { @MainActor in
                     ARStepManager.shared.trigger(animation: animation, instruction: instruction)
                 }
