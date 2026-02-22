@@ -22,6 +22,7 @@ final class LiveKitManager: NSObject {
     var usingGlasses = false
     var onAgentStoppedSpeaking: (() -> Void)?
     var onGlassesDisconnected: (() -> Void)?
+    var onBoundingBoxReceived: (() -> Void)?
 
     // MARK: - Private
     private let room = Room()
@@ -214,6 +215,7 @@ extension LiveKitManager: RoomDelegate {
             Task { @MainActor in
                 guard let box = try? JSONDecoder().decode(BoundingBox.self, from: capturedData) else { return }
                 self.boundingBoxes.append(box)
+                self.onBoundingBoxReceived?()
             }
         }
 

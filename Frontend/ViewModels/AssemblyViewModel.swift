@@ -48,6 +48,7 @@ final class AssemblyViewModel {
     // MARK: - AR Step Overlay
     var showCPROverlay = false
     var overlayInstruction: String = ""
+    private var stepArmed = false   // true once ar_step has been received
 
     // MARK: - LiveKit
     #if canImport(UIKit)
@@ -86,6 +87,13 @@ final class AssemblyViewModel {
             guard let self else { return }
             Task { @MainActor in
                 self.cameraSource = .phone
+            }
+        }
+        liveKit.onBoundingBoxReceived = { [weak self] in
+            // ar_step arms the instruction; bounding box detection fires the overlay
+            guard let self, self.stepArmed else { return }
+            withAnimation(.easeInOut(duration: 0.3)) {
+                self.showCPROverlay = true
             }
         }
 
@@ -128,16 +136,16 @@ final class AssemblyViewModel {
     @MainActor
     func setupStepManager() {
         ARStepManager.shared.onStep = { [weak self] animation, instruction in
-            // trigger() is @MainActor so this closure already runs on MainActor —
-            // no inner Task needed; the extra hop was losing the weak self reference.
-            guard let self else {
-                print("[AR] setupStepManager callback: self is nil, overlay will not show")
-                return
-            }
-            print("[AR] setupStepManager callback: setting showCPROverlay = true")
-            withAnimation(.easeInOut(duration: 0.3)) {
-                self.overlayInstruction = instruction
-                self.showCPROverlay = true
+            guard let self else { return }
+            // Arm: store the instruction and wait for a bounding box to show the overlay.
+            // If the AI already sees something (boxes present), show immediately.
+            self.overlayInstruction = instruction
+            self.stepArmed = true
+            print("[AR] step armed — instruction: \(instruction), boxes: \(self.liveKit.boundingBoxes.count)")
+            if !self.liveKit.boundingBoxes.isEmpty {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    self.showCPROverlay = true
+                }
             }
         }
     }
@@ -147,6 +155,7 @@ final class AssemblyViewModel {
         withAnimation(.easeInOut(duration: 0.3)) {
             showCPROverlay = false
         }
+        stepArmed = false
     }
 
     // MARK: - Lifecycle
