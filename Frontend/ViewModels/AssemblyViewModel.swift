@@ -132,7 +132,7 @@ final class AssemblyViewModel {
                 guard let self else { return }
                 withAnimation(.easeInOut(duration: 0.3)) {
                     self.overlayInstruction = instruction
-                    self.showCPROverlay = (animation == "cpr_hands")
+                    self.showCPROverlay = true
                 }
             }
         }
