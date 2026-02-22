@@ -79,7 +79,6 @@ final class LiveKitManager: NSObject {
     }
 
     // MARK: - Mic Control
-
     func setMicEnabled(_ enabled: Bool) async {
         try? await room.localParticipant.setMicrophone(enabled: enabled)
     }
@@ -133,11 +132,13 @@ extension LiveKitManager: RoomDelegate {
 
     nonisolated func room(_ room: Room, participant: RemoteParticipant?, didReceiveData data: Data, forTopic topic: String, encryptionType: EncryptionType) {
 
-        
-
         if topic == "bounding_box" {
+            let capturedData = data
             Task {
-                if let box = try? JSONDecoder().decode(BoundingBox.self, from: data) {
+                let box = try? await Task.detached {
+                    try JSONDecoder().decode(BoundingBox.self, from: capturedData)
+                }.value
+                if let box {
                     await MainActor.run {
                         self.boundingBoxes = [box]
                     }
@@ -160,16 +161,15 @@ extension LiveKitManager: RoomDelegate {
         }
     }
 
-    nonisolated func room(_ room: Room, didDisconnect disconnectReason: DisconnectReason?) {
+    nonisolated func room(_ room: Room, didDisconnectWithError error: (any Error)?) {
         Task { @MainActor in
             self.isConnected = false
             self.localVideoTrack = nil as VideoTrack?
-            if let reason = disconnectReason {
-                self.connectionError = reason.description
+            if let error {
+                self.connectionError = error.localizedDescription
             }
         }
     }
-
 
     nonisolated func room(_ room: Room, participant: LocalParticipant, didPublishTrack publication: LocalTrackPublication) {
         Task { @MainActor in
