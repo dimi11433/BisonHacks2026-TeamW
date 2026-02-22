@@ -8,7 +8,11 @@ struct HomeView: View {
     @State private var contentOpacity: Double = 0
     @State private var buttonOffset: CGFloat = 30
     @State private var glassesDetected = false
+    @State private var registrationState: RegistrationState = .unavailable
+    @State private var isRegistering = false
+    @State private var registrationError: String?
     @State private var devicesListenerToken: (any AnyListenerToken)?
+    @State private var registrationListenerToken: (any AnyListenerToken)?
     
     private let cyan = Color(hex: 0x00FFFF)
     
@@ -78,13 +82,20 @@ struct HomeView: View {
                 
                 // MARK: - Status Cards
                 VStack(spacing: 12) {
-                    StatusRow(
-                        icon: "eyeglasses",
-                        title: "Meta Ray-Ban",
-                        subtitle: glassesDetected ? "Connected — will use glasses camera" : "Not detected — will use iPhone camera",
-                        accentColor: glassesDetected ? cyan : .orange,
-                        dotColor: glassesDetected ? .green : .orange
-                    )
+                    Button {
+                        if registrationState != .registered {
+                            registerGlasses()
+                        }
+                    } label: {
+                        StatusRow(
+                            icon: "eyeglasses",
+                            title: "Meta Ray-Ban",
+                            subtitle: glassesSubtitle,
+                            accentColor: glassesDetected ? cyan : .orange,
+                            dotColor: glassesDetected ? .green : (registrationState == .registered ? .orange : .red)
+                        )
+                    }
+                    .buttonStyle(.plain)
                     
                     StatusRow(
                         icon: "camera.viewfinder",
@@ -159,12 +170,101 @@ struct HomeView: View {
             Task {
                 await devicesListenerToken?.cancel()
                 devicesListenerToken = nil
+                await registrationListenerToken?.cancel()
+                registrationListenerToken = nil
             }
+        }
+    }
+    
+    private var glassesSubtitle: String {
+        if glassesDetected {
+            return "Connected — will use glasses camera"
+        }
+        if let error = registrationError {
+            return error
+        }
+        switch registrationState {
+        case .registered:
+            return "Registered — waiting for glasses"
+        case .registering:
+            return "Registering with Meta..."
+        case .available:
+            return isRegistering ? "Opening Meta AI..." : "Tap to connect with Meta"
+        case .unavailable:
+            return "Meta AI app required — tap to set up"
+        @unknown default:
+            return "Tap to set up"
+        }
+    }
+    
+    private func registerGlasses() {
+        guard !isRegistering else {
+            print("[Meta] Already registering, skipping")
+            return
+        }
+        registrationError = nil
+        print("[Meta] Current registration state: \(registrationState)")
+        
+        #if canImport(UIKit)
+        if let metaAIURL = URL(string: "fb-viewapp://") {
+            let canOpen = UIApplication.shared.canOpenURL(metaAIURL)
+            print("[Meta] Can open fb-viewapp:// = \(canOpen)")
+            if !canOpen {
+                registrationError = "Meta AI app not found — install from App Store"
+                return
+            }
+        }
+        #endif
+        
+        isRegistering = true
+        Task { @MainActor in
+            do {
+                print("[Meta] Calling startRegistration()...")
+                try await Wearables.shared.startRegistration()
+                print("[Meta] Registration call completed successfully")
+            } catch let error as RegistrationError {
+                print("[Meta] Registration error: \(error) — \(error.description)")
+                switch error {
+                case .metaAINotInstalled:
+                    registrationError = "Install Meta AI app first"
+                case .alreadyRegistered:
+                    registrationError = nil
+                case .configurationInvalid:
+                    registrationError = "Enable Developer Mode in Meta AI settings"
+                case .networkUnavailable:
+                    registrationError = "No network — try again"
+                default:
+                    registrationError = "Error: \(error.description)"
+                }
+            } catch {
+                print("[Meta] Unexpected error: \(error)")
+                registrationError = "Error: \(error.localizedDescription)"
+            }
+            isRegistering = false
         }
     }
     
     private func startGlassesDetection() {
         let wearables = Wearables.shared
+        
+        registrationState = wearables.registrationState
+        print("[Meta] Initial registration state: \(registrationState) (raw: \(registrationState.rawValue))")
+        print("[Meta] Initial devices count: \(wearables.devices.count)")
+        if !wearables.devices.isEmpty {
+            print("[Meta] Device IDs: \(wearables.devices)")
+        }
+        
+        registrationListenerToken = wearables.addRegistrationStateListener { state in
+            Task { @MainActor in
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    self.registrationState = state
+                }
+                print("[Meta] Registration state changed: \(state)")
+                if state == .registered {
+                    self.updateGlassesState(deviceIds: wearables.devices, wearables: wearables)
+                }
+            }
+        }
         
         updateGlassesState(deviceIds: wearables.devices, wearables: wearables)
         
