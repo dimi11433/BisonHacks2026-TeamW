@@ -128,12 +128,16 @@ final class AssemblyViewModel {
     @MainActor
     func setupStepManager() {
         ARStepManager.shared.onStep = { [weak self] animation, instruction in
-            Task { @MainActor in
-                guard let self else { return }
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    self.overlayInstruction = instruction
-                    self.showCPROverlay = true
-                }
+            // trigger() is @MainActor so this closure already runs on MainActor —
+            // no inner Task needed; the extra hop was losing the weak self reference.
+            guard let self else {
+                print("[AR] setupStepManager callback: self is nil, overlay will not show")
+                return
+            }
+            print("[AR] setupStepManager callback: setting showCPROverlay = true")
+            withAnimation(.easeInOut(duration: 0.3)) {
+                self.overlayInstruction = instruction
+                self.showCPROverlay = true
             }
         }
     }
