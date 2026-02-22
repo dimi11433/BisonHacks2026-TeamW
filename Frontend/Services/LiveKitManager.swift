@@ -3,6 +3,7 @@ import Foundation
 import AVFoundation
 import LiveKit
 import Combine
+import UIKit
 
 @Observable
 final class LiveKitManager: NSObject {
@@ -80,7 +81,11 @@ final class LiveKitManager: NSObject {
 
     // MARK: - Mic Control
     func setMicEnabled(_ enabled: Bool) async {
-        try await room.localParticipant.setMicrophone(enabled: enabled)
+        do {
+            try await room.localParticipant.setMicrophone(enabled: enabled)
+        } catch {
+            print("[LiveKit] Mic error: \(error)")
+        }
     }
 
     // MARK: - Token Fetch
@@ -134,14 +139,10 @@ extension LiveKitManager: RoomDelegate {
 
         if topic == "bounding_box" {
             let capturedData = data
-            Task {
-                let box = try? await Task.detached {
-                    try JSONDecoder().decode(BoundingBox.self, from: capturedData)
-                }.value
-                if let box {
-                    await MainActor.run {
-                        self.boundingBoxes = [box]
-                    }
+            Task.detached {
+                guard let box = try? JSONDecoder().decode(BoundingBox.self, from: capturedData) else { return }
+                await MainActor.run {
+                    self.boundingBoxes = [box]
                 }
             }
         }
@@ -151,25 +152,15 @@ extension LiveKitManager: RoomDelegate {
                let animation = json["animation"] as? String,
                let instruction = json["instruction"] as? String {
                 Task { @MainActor in
-                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                       let rootVC = windowScene.windows.first?.rootViewController,
-                       let arVC = rootVC.findViewController(ofType: ARViewController.self) {
-                        arVC.onStepReceived(animation: animation, instruction: instruction)
-                    }
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("ARStep"),
+                        object: nil,
+                        userInfo: ["animation": animation, "instruction": instruction]
+                    )
                 }
             }
         }
     }
-
-    // nonisolated func room(_ room: Room, didDisconnectWithError error: (any Error)?) {
-    //     Task { @MainActor in
-    //         self.isConnected = false
-    //         self.localVideoTrack = nil as VideoTrack?
-    //         if let error {
-    //             self.connectionError = error.localizedDescription
-    //         }
-    //     }
-    // }
 
     nonisolated func room(_ room: Room, participant: LocalParticipant, didPublishTrack publication: LocalTrackPublication) {
         Task { @MainActor in
@@ -188,20 +179,6 @@ extension LiveKitManager: RoomDelegate {
                 self.onAgentStoppedSpeaking?()
             }
         }
-    }
-}
-
-// MARK: - UIViewController Helper
-extension UIViewController {
-    func findViewController<T: UIViewController>(ofType type: T.Type) -> T? {
-        if let vc = self as? T { return vc }
-        for child in children {
-            if let found = child.findViewController(ofType: type) { return found }
-        }
-        if let presented = presentedViewController {
-            return presented.findViewController(ofType: type)
-        }
-        return nil
     }
 }
 
