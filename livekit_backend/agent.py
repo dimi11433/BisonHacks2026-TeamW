@@ -128,7 +128,10 @@ server = AgentServer()
 
 
 def prewarm(proc: JobProcess):
-    proc.userdata["vad"] = silero.VAD.load()
+    proc.userdata["vad"] = silero.VAD.load(
+        activation_threshold=0.65,
+        min_silence_duration=0.5,
+    )
 
 
 server.setup_fnc = prewarm

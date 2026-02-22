@@ -19,6 +19,8 @@ final class LiveKitManager: NSObject {
     var boundingBoxes: [BoundingBox] = []
     var localVideoTrack: VideoTrack?
     var connectionError: String?
+    var isAgentSpeaking = false
+    var onAgentStoppedSpeaking: (() -> Void)?
 
     // MARK: - Private
 
@@ -81,6 +83,12 @@ final class LiveKitManager: NSObject {
         isConnected = false
         localVideoTrack = nil
         boundingBoxes = []
+    }
+
+    // MARK: - Mic Control
+
+    func setMicEnabled(_ enabled: Bool) async {
+        try? await room.localParticipant.setMicrophone(enabled: enabled)
     }
 
     // MARK: - Token Fetch
@@ -158,6 +166,17 @@ extension LiveKitManager: RoomDelegate {
         if let videoTrack = publication.track as? VideoTrack {
             Task { @MainActor in
                 self.localVideoTrack = videoTrack
+            }
+        }
+    }
+
+    nonisolated func room(_ room: Room, participant: Participant, didUpdateIsSpeaking isSpeaking: Bool) {
+        guard participant is RemoteParticipant else { return }
+        Task { @MainActor in
+            let wasSpeaking = self.isAgentSpeaking
+            self.isAgentSpeaking = isSpeaking
+            if wasSpeaking && !isSpeaking {
+                self.onAgentStoppedSpeaking?()
             }
         }
     }

@@ -29,7 +29,7 @@ final class AssemblyViewModel {
     var progress: Double { Double(currentStepIndex + 1) / Double(totalSteps) }
     
     // MARK: - Voice State
-    var voiceState: VoiceTriggerState = .idle
+    var voiceState: VoiceTriggerState = .listening
     var isListening: Bool { voiceState == .listening }
     
     // MARK: - Connection & Camera Source
@@ -68,8 +68,15 @@ final class AssemblyViewModel {
 
     func connectLiveKit() {
         #if canImport(UIKit)
+        liveKit.onAgentStoppedSpeaking = { [weak self] in
+            guard let self, self.voiceState == .responding else { return }
+            self.voiceState = .listening
+            self.startWaveformAnimation()
+            Task { await self.liveKit.setMicEnabled(true) }
+        }
         Task {
             await liveKit.connect()
+            startWaveformAnimation()
         }
         #endif
     }
@@ -154,33 +161,18 @@ final class AssemblyViewModel {
     // MARK: - Voice Trigger
     
     func toggleVoice() {
+        #if canImport(UIKit)
         switch voiceState {
-        case .idle:
+        case .listening:
+            voiceState = .responding
+            stopWaveformAnimation()
+            Task { await liveKit.setMicEnabled(false) }
+        case .responding:
             voiceState = .listening
             startWaveformAnimation()
-            simulateVoiceFlow()
-        case .listening:
-            voiceState = .idle
-            stopWaveformAnimation()
-        default:
-            break
+            Task { await liveKit.setMicEnabled(true) }
         }
-    }
-    
-    private func simulateVoiceFlow() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-            guard self?.voiceState == .listening else { return }
-            self?.voiceState = .processing
-            self?.stopWaveformAnimation()
-            
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.voiceState = .speaking
-                
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                    self?.voiceState = .idle
-                }
-            }
-        }
+        #endif
     }
     
     // MARK: - Waveform
