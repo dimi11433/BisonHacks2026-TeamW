@@ -135,14 +135,40 @@ final class LiveKitManager: NSObject {
 extension LiveKitManager: RoomDelegate {
 
     nonisolated func room(_ room: Room, participant: RemoteParticipant?, didReceiveData data: Data, forTopic topic: String, encryptionType: EncryptionType) {
-        guard topic == "bounding_box" else { return }
-
-        if let box = try? JSONDecoder().decode(BoundingBox.self, from: data) {
-            Task { @MainActor in
-                self.boundingBoxes = [box]
+    
+        if topic == "bounding_box" {
+            if let box = try? JSONDecoder().decode(BoundingBox.self, from: data) {
+                Task { @MainActor in
+                    self.boundingBoxes = [box]
+                }
+            }
+        }
+        
+        if topic == "ar_step" {
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let animation = json["animation"] as? String,
+            let instruction = json["instruction"] as? String {
+                Task { @MainActor in
+                    // Find the ARViewController and call onStepReceived
+                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                    let rootVC = windowScene.windows.first?.rootViewController,
+                    let arVC = rootVC.findViewController(ofType: ARViewController.self) {
+                        arVC.onStepReceived(animation: animation, instruction: instruction)
+                    }
+                }
             }
         }
     }
+
+    // nonisolated func room(_ room: Room, participant: RemoteParticipant?, didReceiveData data: Data, forTopic topic: String, encryptionType: EncryptionType) {
+    //     guard topic == "bounding_box" else { return }
+
+    //     if let box = try? JSONDecoder().decode(BoundingBox.self, from: data) {
+    //         Task { @MainActor in
+    //             self.boundingBoxes = [box]
+    //         }
+    //     }
+    // }
 
     nonisolated func room(_ room: Room, didDisconnectWithError error: (any Error)?) {
         Task { @MainActor in
@@ -163,3 +189,17 @@ extension LiveKitManager: RoomDelegate {
     }
 }
 #endif
+
+
+extension UIViewController {
+    func findViewController<T: UIViewController>(ofType type: T.Type) -> T? {
+        if let vc = self as? T { return vc }
+        for child in children {
+            if let found = child.findViewController(ofType: type) { return found }
+        }
+        if let presented = presentedViewController {
+            return presented.findViewController(ofType: type)
+        }
+        return nil
+    }
+}
