@@ -106,10 +106,8 @@ struct AssemblyView: View {
         .statusBarHidden()
         .onAppear {
             viewModel.setupStepManager()
-            Task {
-                await viewModel.detectGlasses()
-                viewModel.connectLiveKit()
-            }
+            Task { await viewModel.detectGlasses() }
+            viewModel.connectLiveKit()
         }
         .onDisappear {
             viewModel.disconnectLiveKit()

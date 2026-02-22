@@ -9,7 +9,8 @@ import UIKit
 final class LiveKitManager: NSObject {
 
     // MARK: - Configuration
-    static let tokenServerURL = "https://f10d-138-238-254-107.ngrok-free.app"
+    // Update this after starting ngrok: `ngrok http 3001`
+    static var tokenServerURL = "http://10.30.140.175:3001"
 
     // MARK: - Public State
     var isConnected = false
@@ -170,6 +171,9 @@ final class LiveKitManager: NSObject {
     private static let localSession: URLSession = {
         let config = URLSessionConfiguration.default
         config.connectionProxyDictionary = [:]
+        config.timeoutIntervalForRequest = 10
+        config.timeoutIntervalForResource = 15
+        config.waitsForConnectivity = false
         return URLSession(configuration: config)
     }()
 

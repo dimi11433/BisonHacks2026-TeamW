@@ -49,6 +49,9 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Used for voice commands and AI interaction</string>
 
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Connects to the local AI server for real-time assistance</string>
+
 	<key>MWDAT</key>
 	<dict>
 		<key>AppLinkURLScheme</key>
