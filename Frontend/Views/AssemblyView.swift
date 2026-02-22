@@ -7,17 +7,23 @@ import ARKit
 struct AssemblyView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel = AssemblyViewModel()
+    var preferredCameraSource: CameraSource = .phone
 
     var body: some View {
         ZStack {
             // MARK: - Camera Background (ARView)
             #if canImport(UIKit)
-            if viewModel.liveKit.isConnected, let capturer = viewModel.arFrameCapturer {
-                ARSceneView(
-                    boxes: viewModel.boundingBoxes,
-                    frameCapturer: capturer
-                )
-                .ignoresSafeArea()
+            if viewModel.liveKit.isConnected {
+                if viewModel.liveKit.usingGlasses, let track = viewModel.liveKit.localVideoTrack {
+                    SwiftUIVideoView(track, layoutMode: .fill)
+                        .ignoresSafeArea()
+                } else if let capturer = viewModel.arFrameCapturer {
+                    ARSceneView(
+                        boxes: viewModel.boundingBoxes,
+                        frameCapturer: capturer
+                    )
+                    .ignoresSafeArea()
+                }
             } else {
                 Color.black.ignoresSafeArea()
                 VStack(spacing: 12) {
@@ -103,7 +109,7 @@ struct AssemblyView: View {
         .onAppear {
             viewModel.setupStepManager()
             Task { await viewModel.detectGlasses() }
-            viewModel.connectLiveKit()
+            viewModel.connectLiveKit(preferredSource: preferredCameraSource)
         }
         .onDisappear {
             viewModel.disconnectLiveKit()

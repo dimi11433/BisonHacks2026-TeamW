@@ -190,7 +190,6 @@ final class GlassesSessionManager {
         }
 
         configureHFPAudio()
-        try? await Task.sleep(nanoseconds: 2 * NSEC_PER_SEC)
 
         await session.start()
         print("[Glasses] Stream session started")

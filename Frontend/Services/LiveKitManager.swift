@@ -68,21 +68,6 @@ final class LiveKitManager: NSObject {
                         self.onGlassesDisconnected?()
                     }
                 }
-                capturer.onStreaming = { [weak self] in
-                    Task { @MainActor in
-                        guard let self, !self.usingGlasses else { return }
-                        print("[LiveKit] Glasses connected late, switching to glasses camera")
-                        do {
-                            try await self.room.localParticipant.setCamera(enabled: false)
-                            try await self.room.localParticipant.publish(videoTrack: capturer.videoTrack)
-                            self.localVideoTrack = capturer.videoTrack
-                            self.usingGlasses = true
-                            self.glassesCapturer = capturer
-                        } catch {
-                            print("[LiveKit] Failed to switch to glasses: \(error)")
-                        }
-                    }
-                }
                 glassesCapturer = capturer
                 let started = await capturer.start()
                 if started {
@@ -97,6 +82,21 @@ final class LiveKitManager: NSObject {
                         captureOptions: CameraCaptureOptions(position: .back)
                     )
                     usingGlasses = false
+                }
+                capturer.onStreaming = { [weak self] in
+                    Task { @MainActor in
+                        guard let self, !self.usingGlasses else { return }
+                        print("[LiveKit] Glasses connected late, switching to glasses camera")
+                        do {
+                            try await self.room.localParticipant.setCamera(enabled: false)
+                            try await self.room.localParticipant.publish(videoTrack: capturer.videoTrack)
+                            self.localVideoTrack = capturer.videoTrack
+                            self.usingGlasses = true
+                            self.glassesCapturer = capturer
+                        } catch {
+                            print("[LiveKit] Failed to switch to glasses: \(error)")
+                        }
+                    }
                 }
             } else {
                 try await room.localParticipant.setCamera(

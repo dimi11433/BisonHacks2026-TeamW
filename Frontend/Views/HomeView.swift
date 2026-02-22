@@ -13,6 +13,8 @@ struct HomeView: View {
     @State private var registrationError: String?
     @State private var devicesListenerToken: (any AnyListenerToken)?
     @State private var registrationListenerToken: (any AnyListenerToken)?
+    @State private var pollingTask: Task<Void, Never>?
+    @State private var selectedCameraSource: CameraSource = .phone
     
     private let cyan = Color(hex: 0x00FFFF)
     
@@ -110,6 +112,21 @@ struct HomeView: View {
                 .padding(.horizontal, 24)
                 .opacity(contentOpacity)
                 
+                Spacer().frame(height: 16)
+                
+                // MARK: - Camera Source Picker
+                HStack(spacing: 0) {
+                    cameraSourceOption(.phone)
+                    cameraSourceOption(.glasses)
+                }
+                .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(.white.opacity(0.06), lineWidth: 0.5)
+                )
+                .padding(.horizontal, 24)
+                .opacity(contentOpacity)
+                
                 Spacer().frame(height: 36)
                 
                 // MARK: - Start Button
@@ -147,7 +164,7 @@ struct HomeView: View {
         }
         .preferredColorScheme(.dark)
         .fullScreenCover(isPresented: $showAssembly) {
-            AssemblyView()
+            AssemblyView(preferredCameraSource: selectedCameraSource)
         }
         .onAppear {
             withAnimation(.spring(response: 0.8, dampingFraction: 0.7).delay(0.1)) {
@@ -161,6 +178,8 @@ struct HomeView: View {
             startGlassesDetection()
         }
         .onDisappear {
+            pollingTask?.cancel()
+            pollingTask = nil
             Task {
                 await devicesListenerToken?.cancel()
                 devicesListenerToken = nil
@@ -172,7 +191,7 @@ struct HomeView: View {
     
     private var glassesSubtitle: String {
         if glassesDetected {
-            return "Connected — will use glasses camera"
+            return "Connected"
         }
         if let error = registrationError {
             return error
@@ -191,6 +210,35 @@ struct HomeView: View {
         }
     }
     
+    @ViewBuilder
+    private func cameraSourceOption(_ source: CameraSource) -> some View {
+        let isSelected = selectedCameraSource == source
+        let isDisabled = source == .glasses && !glassesDetected
+
+        Button {
+            guard !isDisabled else { return }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                selectedCameraSource = source
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: source.icon)
+                    .font(.system(size: 12, weight: .medium))
+                Text(source.rawValue)
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+            }
+            .foregroundStyle(isDisabled ? .white.opacity(0.2) : isSelected ? .black : .white.opacity(0.5))
+            .frame(maxWidth: .infinity)
+            .frame(height: 40)
+            .background(
+                isSelected ? cyan : Color.clear,
+                in: RoundedRectangle(cornerRadius: 10)
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(2)
+    }
+
     private func registerGlasses() {
         guard !isRegistering else {
             print("[Meta] Already registering, skipping")
@@ -267,6 +315,14 @@ struct HomeView: View {
                 self.updateGlassesState(deviceIds: ids, wearables: wearables)
             }
         }
+        
+        pollingTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled else { break }
+                self.updateGlassesState(deviceIds: wearables.devices, wearables: wearables)
+            }
+        }
     }
     
     private func updateGlassesState(deviceIds: [String], wearables: any WearablesInterface) {
@@ -275,10 +331,19 @@ struct HomeView: View {
             let connected = device.linkState == .connected
             withAnimation(.easeInOut(duration: 0.3)) {
                 glassesDetected = connected
+                if connected && selectedCameraSource == .phone {
+                    selectedCameraSource = .glasses
+                }
+                if !connected && selectedCameraSource == .glasses {
+                    selectedCameraSource = .phone
+                }
             }
         } else {
             withAnimation(.easeInOut(duration: 0.3)) {
                 glassesDetected = false
+                if selectedCameraSource == .glasses {
+                    selectedCameraSource = .phone
+                }
             }
         }
     }

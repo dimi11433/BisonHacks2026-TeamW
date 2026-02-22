@@ -71,7 +71,7 @@ final class AssemblyViewModel {
         #endif
     }
 
-    func connectLiveKit() {
+    func connectLiveKit(preferredSource: CameraSource = .phone) {
         #if canImport(UIKit)
         liveKit.onAgentStoppedSpeaking = { [weak self] in
             guard let self else { return }
@@ -92,13 +92,21 @@ final class AssemblyViewModel {
         let capturer = ARFrameCapturer()
         self.arFrameCapturer = capturer
 
+        let useGlasses = preferredSource == .glasses
+
         Task {
-            await liveKit.connect(useGlassesCamera: false, skipCamera: true)
-            do {
-                try await liveKit.publishExternalTrack(capturer.videoTrack)
-                print("[AssemblyVM] AR frame capturer track published.")
-            } catch {
-                print("[AssemblyVM] Failed to publish AR track: \(error)")
+            if useGlasses {
+                print("[AssemblyVM] User selected glasses camera")
+                await liveKit.connect(useGlassesCamera: true)
+            } else {
+                print("[AssemblyVM] User selected iPhone camera — using AR frame capturer")
+                await liveKit.connect(useGlassesCamera: false, skipCamera: true)
+                do {
+                    try await liveKit.publishExternalTrack(capturer.videoTrack)
+                    print("[AssemblyVM] AR frame capturer track published.")
+                } catch {
+                    print("[AssemblyVM] Failed to publish AR track: \(error)")
+                }
             }
             await MainActor.run {
                 startWaveformAnimation()

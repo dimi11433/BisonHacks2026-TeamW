@@ -31,6 +31,8 @@ final class GlassesCapturer: Sendable {
     func start() async -> Bool {
         let wearables = Wearables.shared
 
+        await requestCameraPermission(wearables: wearables)
+
         let config = StreamSessionConfig(
             videoCodec: .raw,
             resolution: .high,
@@ -65,14 +67,14 @@ final class GlassesCapturer: Sendable {
         await session.start()
         print("[Glasses] Session started, state: \(session.state)")
 
-        // waitingForDevice is normal — the AutoDeviceSelector will find glasses
-        // when they connect. Wait briefly for streaming to begin, then fall back.
-        let deadline = Date().addingTimeInterval(5)
+        // Give glasses up to 3 seconds to reach streaming before falling back.
+        // The stream transitions through waitingForDevice -> starting -> streaming;
+        // activating the iPhone camera while this is in progress kills the session.
+        let deadline = Date().addingTimeInterval(3)
         while Date() < deadline {
             let state = session.state
             if state == .streaming {
                 print("[Glasses] Streaming confirmed")
-                await requestCameraPermission(wearables: wearables)
                 return true
             }
             if state == .stopped {
@@ -80,18 +82,16 @@ final class GlassesCapturer: Sendable {
                 await cleanUp()
                 return false
             }
-            try? await Task.sleep(for: .milliseconds(500))
+            try? await Task.sleep(for: .milliseconds(250))
         }
 
-        // Still in waitingForDevice or starting after timeout —
-        // keep session alive in background, it'll connect when glasses pair
-        let state = session.state
-        if state == .waitingForDevice || state == .starting {
-            print("[Glasses] Glasses not found within timeout, keeping session alive in background")
+        let finalState = session.state
+        if finalState == .waitingForDevice || finalState == .starting {
+            print("[Glasses] Glasses not streaming within timeout, keeping session alive in background")
             return false
         }
 
-        print("[Glasses] Unexpected state after timeout: \(state)")
+        print("[Glasses] Unexpected state after timeout: \(finalState)")
         await cleanUp()
         return false
     }
