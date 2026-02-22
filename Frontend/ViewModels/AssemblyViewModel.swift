@@ -45,6 +45,10 @@ final class AssemblyViewModel {
     var waveformAmplitudes: [CGFloat] = Array(repeating: 0.1, count: 7)
     private var waveformTimer: Timer?
 
+    // MARK: - AR Step Overlay
+    var showCPROverlay = false
+    var overlayInstruction: String = ""
+
     // MARK: - LiveKit
     #if canImport(UIKit)
     let liveKit = LiveKitManager()
@@ -101,8 +105,30 @@ final class AssemblyViewModel {
         #endif
     }
     
+    // MARK: - AR Step Manager
+
+    @MainActor
+    func setupStepManager() {
+        ARStepManager.shared.onStep = { [weak self] animation, instruction in
+            Task { @MainActor in
+                guard let self else { return }
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    self.overlayInstruction = instruction
+                    self.showCPROverlay = (animation == "cpr_hands")
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func dismissOverlay() {
+        withAnimation(.easeInOut(duration: 0.3)) {
+            showCPROverlay = false
+        }
+    }
+
     // MARK: - Lifecycle
-    
+
     func detectGlasses() async {
         isDetectingGlasses = true
         
