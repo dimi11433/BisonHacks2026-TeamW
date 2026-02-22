@@ -10,7 +10,7 @@ final class LiveKitManager: NSObject {
 
     // MARK: - Configuration
     // Update this after starting ngrok: `ngrok http 3001`
-    static var tokenServerURL = "http://10.30.140.175:3001"
+    static var tokenServerURL = "https://f10d-138-238-254-107.ngrok-free.app"
 
     // MARK: - Public State
     var isConnected = false
