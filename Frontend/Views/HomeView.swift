@@ -15,6 +15,7 @@ struct HomeView: View {
     @State private var registrationListenerToken: (any AnyListenerToken)?
     @State private var pollingTask: Task<Void, Never>?
     @State private var selectedCameraSource: CameraSource = .phone
+    @State private var hasAutoSelectedGlasses = false
     
     private let cyan = Color(hex: 0x00FFFF)
     
@@ -321,6 +322,7 @@ struct HomeView: View {
                 try? await Task.sleep(for: .seconds(3))
                 guard !Task.isCancelled else { break }
                 self.updateGlassesState(deviceIds: wearables.devices, wearables: wearables)
+                if self.glassesDetected { break }
             }
         }
     }
@@ -331,8 +333,9 @@ struct HomeView: View {
             let connected = device.linkState == .connected
             withAnimation(.easeInOut(duration: 0.3)) {
                 glassesDetected = connected
-                if connected && selectedCameraSource == .phone {
+                if connected && !hasAutoSelectedGlasses {
                     selectedCameraSource = .glasses
+                    hasAutoSelectedGlasses = true
                 }
                 if !connected && selectedCameraSource == .glasses {
                     selectedCameraSource = .phone

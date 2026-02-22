@@ -15,8 +15,12 @@ struct AssemblyView: View {
             #if canImport(UIKit)
             if viewModel.liveKit.isConnected {
                 if viewModel.liveKit.usingGlasses, let track = viewModel.liveKit.localVideoTrack {
-                    SwiftUIVideoView(track, layoutMode: .fill)
-                        .ignoresSafeArea()
+                    ZStack {
+                        SwiftUIVideoView(track, layoutMode: .fill)
+                            .ignoresSafeArea()
+                        BoundingBoxOverlay(boxes: viewModel.boundingBoxes)
+                            .ignoresSafeArea()
+                    }
                 } else if let capturer = viewModel.arFrameCapturer {
                     ARSceneView(
                         boxes: viewModel.boundingBoxes,
