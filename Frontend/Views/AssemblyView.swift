@@ -1,6 +1,7 @@
 import SwiftUI
 #if canImport(UIKit)
 import LiveKit
+import ARKit
 #endif
 
 struct AssemblyView: View {
@@ -9,11 +10,14 @@ struct AssemblyView: View {
 
     var body: some View {
         ZStack {
-            // MARK: - Camera Background
+            // MARK: - Camera Background (ARView)
             #if canImport(UIKit)
-            if let track = viewModel.liveKit.localVideoTrack {
-                SwiftUIVideoView(track, layoutMode: .fill)
-                    .ignoresSafeArea()
+            if viewModel.liveKit.isConnected, let capturer = viewModel.arFrameCapturer {
+                ARSceneView(
+                    boxes: viewModel.boundingBoxes,
+                    frameCapturer: capturer
+                )
+                .ignoresSafeArea()
             } else {
                 Color.black.ignoresSafeArea()
                 VStack(spacing: 12) {
@@ -45,10 +49,6 @@ struct AssemblyView: View {
             #else
             Color.black.ignoresSafeArea()
             #endif
-
-            // MARK: - Bounding Box Overlay
-            BoundingBoxOverlay(boxes: viewModel.boundingBoxes)
-                .ignoresSafeArea()
 
             // MARK: - HUD Layer
             VStack {

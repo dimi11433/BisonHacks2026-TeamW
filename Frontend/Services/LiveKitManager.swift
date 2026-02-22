@@ -34,7 +34,7 @@ final class LiveKitManager: NSObject {
     }
 
     // MARK: - Connect
-    func connect(useGlassesCamera: Bool = false) async {
+    func connect(useGlassesCamera: Bool = false, skipCamera: Bool = false) async {
         guard !isConnected, !isConnecting else { return }
         isConnecting = true
         connectionError = nil
@@ -50,7 +50,9 @@ final class LiveKitManager: NSObject {
             )
             print("[LiveKit] Room connected. Setting up camera...")
 
-            if useGlassesCamera {
+            if skipCamera {
+                print("[LiveKit] Skipping built-in camera (ARView will provide frames).")
+            } else if useGlassesCamera {
                 let capturer = GlassesCapturer()
                 capturer.onDisconnected = { [weak self] in
                     Task { @MainActor in
@@ -123,6 +125,13 @@ final class LiveKitManager: NSObject {
         }
 
         isConnecting = false
+    }
+
+    // MARK: - Publish External Video Track (e.g. from ARSession)
+    func publishExternalTrack(_ track: LocalVideoTrack) async throws {
+        try await room.localParticipant.publish(videoTrack: track)
+        localVideoTrack = track
+        print("[LiveKit] External video track published.")
     }
 
     // MARK: - Disconnect
@@ -201,7 +210,7 @@ extension LiveKitManager: RoomDelegate {
             Task.detached {
                 guard let box = try? JSONDecoder().decode(BoundingBox.self, from: capturedData) else { return }
                 await MainActor.run {
-                    self.boundingBoxes = [box]
+                    self.boundingBoxes.append(box)
                 }
             }
         }
@@ -230,6 +239,9 @@ extension LiveKitManager: RoomDelegate {
         Task { @MainActor in
             let wasSpeaking = self.isAgentSpeaking
             self.isAgentSpeaking = isSpeaking
+            if !wasSpeaking && isSpeaking {
+                self.boundingBoxes = []
+            }
             if wasSpeaking && !isSpeaking {
                 self.onAgentStoppedSpeaking?()
             }

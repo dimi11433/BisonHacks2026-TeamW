@@ -48,6 +48,7 @@ final class AssemblyViewModel {
     // MARK: - LiveKit
     #if canImport(UIKit)
     let liveKit = LiveKitManager()
+    var arFrameCapturer: ARFrameCapturer?
     #endif
 
     var boundingBoxes: [BoundingBox] {
@@ -83,9 +84,18 @@ final class AssemblyViewModel {
                 self.cameraSource = .phone
             }
         }
-        let useGlasses = cameraSource == .glasses
+
+        let capturer = ARFrameCapturer()
+        self.arFrameCapturer = capturer
+
         Task {
-            await liveKit.connect(useGlassesCamera: useGlasses)
+            await liveKit.connect(useGlassesCamera: false, skipCamera: true)
+            do {
+                try await liveKit.publishExternalTrack(capturer.videoTrack)
+                print("[AssemblyVM] AR frame capturer track published.")
+            } catch {
+                print("[AssemblyVM] Failed to publish AR track: \(error)")
+            }
             await MainActor.run {
                 startWaveformAnimation()
             }
