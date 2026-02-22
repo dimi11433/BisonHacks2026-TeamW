@@ -105,9 +105,11 @@ struct AssemblyView: View {
                     Spacer()
 
                     #if canImport(UIKit)
-                    ConnectionPill(
+                    SourceSwitcherPill(
                         isConnected: viewModel.liveKit.isConnected,
-                        usingGlasses: viewModel.liveKit.usingGlasses
+                        usingGlasses: viewModel.liveKit.usingGlasses,
+                        glassesAvailable: viewModel.isGlassesConnected,
+                        onSwitch: { source in viewModel.switchSource(to: source) }
                     )
                     #endif
                 }
@@ -139,51 +141,81 @@ struct AssemblyView: View {
 
     @ViewBuilder
     private func animationView(for anim: AnimationCommand) -> some View {
-        switch anim.animation {
-        case "cpr_compressions":
-            CPRAnimationOverlay(
-                instruction: anim.instruction,
-                onDismiss: { viewModel.dismissAnimation() },
-                anchorX: anim.x,
-                anchorY: anim.y
-            )
-        default:
-            EmptyView()
-        }
+        CPRAnimationOverlay(
+            animationName: anim.animation,
+            instruction: anim.instruction,
+            onDismiss: { viewModel.dismissAnimation() },
+            anchorX: anim.x,
+            anchorY: anim.y
+        )
     }
 }
 
-// MARK: - Connection Indicator
+// MARK: - Source Switcher Pill
 
-private struct ConnectionPill: View {
+private struct SourceSwitcherPill: View {
     let isConnected: Bool
     var usingGlasses: Bool = false
-    private let cyan = Color(hex: 0x00FFFF)
+    var glassesAvailable: Bool = false
+    var onSwitch: (CameraSource) -> Void
+
+    @State private var showingMenu = false
+
+    private var currentSource: CameraSource { usingGlasses ? .glasses : .phone }
 
     var body: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(isConnected ? Color.green : Color.orange)
-                .frame(width: 6, height: 6)
+        Menu {
+            Button {
+                onSwitch(.phone)
+            } label: {
+                Label {
+                    Text("iPhone Camera")
+                } icon: {
+                    Image(systemName: "iphone")
+                }
+            }
+            .disabled(!usingGlasses)
 
-            if isConnected {
-                if usingGlasses {
+            Button {
+                onSwitch(.glasses)
+            } label: {
+                Label {
+                    Text("Meta Ray-Ban")
+                } icon: {
                     Image(systemName: "eyeglasses")
+                }
+            }
+            .disabled(usingGlasses || !glassesAvailable)
+        } label: {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(isConnected ? Color.green : Color.orange)
+                    .frame(width: 6, height: 6)
+
+                if isConnected {
+                    Image(systemName: currentSource.icon)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.7))
+
+                    Text("Live \u{2022} \(currentSource.rawValue)")
+                        .font(.system(.caption2, design: .rounded, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.7))
+
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.4))
+                } else {
+                    Text("Connecting")
+                        .font(.system(.caption2, design: .rounded, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.7))
                 }
-                Text(usingGlasses ? "Live \u{2022} Glasses" : "Live \u{2022} iPhone")
-                    .font(.system(.caption2, design: .rounded, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.7))
-            } else {
-                Text("Connecting")
-                    .font(.system(.caption2, design: .rounded, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.7))
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().stroke(.white.opacity(0.1), lineWidth: 0.5))
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.1), lineWidth: 0.5))
+        .menuStyle(.borderlessButton)
+        .disabled(!isConnected)
     }
 }

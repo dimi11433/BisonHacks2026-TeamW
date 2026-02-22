@@ -153,6 +153,26 @@ final class AssemblyViewModel {
         #endif
     }
 
+    // MARK: - Source Switching
+
+    func switchSource(to source: CameraSource) {
+        #if canImport(UIKit)
+        guard liveKit.isConnected else { return }
+        let alreadyOnSource = (source == .glasses && liveKit.usingGlasses)
+            || (source == .phone && !liveKit.usingGlasses)
+        guard !alreadyOnSource else { return }
+
+        cameraSource = source
+        Task {
+            if source == .glasses {
+                await liveKit.switchToGlasses()
+            } else {
+                await liveKit.switchToPhone(arCapturer: arFrameCapturer)
+            }
+        }
+        #endif
+    }
+
     // MARK: - Lifecycle
 
     func detectGlasses() async {

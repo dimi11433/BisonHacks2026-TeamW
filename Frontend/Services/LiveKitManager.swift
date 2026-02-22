@@ -140,6 +140,76 @@ final class LiveKitManager: NSObject {
         print("[LiveKit] External video track published.")
     }
 
+    // MARK: - Switch Camera Source (live, while connected)
+    func switchToGlasses() async {
+        guard isConnected, !usingGlasses else { return }
+
+        let capturer = GlassesCapturer()
+        capturer.onDisconnected = { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                print("[LiveKit] Glasses disconnected, falling back to iPhone camera")
+                self.usingGlasses = false
+                self.glassesCapturer = nil
+                self.onGlassesDisconnected?()
+            }
+        }
+        glassesCapturer = capturer
+
+        let started = await capturer.start()
+        guard started else {
+            print("[LiveKit] Glasses not available, cannot switch.")
+            glassesCapturer = nil
+            return
+        }
+
+        do {
+            for pub in room.localParticipant.localVideoTracks {
+                try await room.localParticipant.unpublish(publication: pub)
+            }
+            try await room.localParticipant.setCamera(enabled: false)
+            try await room.localParticipant.publish(videoTrack: capturer.videoTrack)
+            localVideoTrack = capturer.videoTrack
+            usingGlasses = true
+            print("[LiveKit] Switched to glasses camera.")
+        } catch {
+            print("[LiveKit] Failed to switch to glasses: \(error)")
+        }
+    }
+
+    func switchToPhone(arCapturer: ARFrameCapturer?) async {
+        guard isConnected, usingGlasses else { return }
+
+        if let capturer = glassesCapturer {
+            await capturer.stop()
+            glassesCapturer = nil
+        }
+
+        do {
+            for pub in room.localParticipant.localVideoTracks {
+                try await room.localParticipant.unpublish(publication: pub)
+            }
+
+            if let arCapturer {
+                try await room.localParticipant.publish(videoTrack: arCapturer.videoTrack)
+                localVideoTrack = arCapturer.videoTrack
+            } else {
+                try await room.localParticipant.setCamera(
+                    enabled: true,
+                    captureOptions: CameraCaptureOptions(position: .back)
+                )
+                if let pub = room.localParticipant.localVideoTracks.first,
+                   let track = pub.track as? VideoTrack {
+                    localVideoTrack = track
+                }
+            }
+            usingGlasses = false
+            print("[LiveKit] Switched to iPhone camera.")
+        } catch {
+            print("[LiveKit] Failed to switch to phone: \(error)")
+        }
+    }
+
     // MARK: - Disconnect
     func disconnect() async {
         if let capturer = glassesCapturer {
