@@ -29,6 +29,11 @@ class ARViewController: UIViewController, ARSessionDelegate {
         view.addSubview(instructionLabel)
         
         startAR()
+
+    // TEMP TEST — remove before final demo
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            self.onStepReceived(animation: "cpr_hands", instruction: "Place both hands on center of chest")
+        }
     }
     
     func startAR() {
