@@ -73,13 +73,7 @@ struct HomeView: View {
                 }
                 
                 Spacer().frame(height: 30)
-                
-                // MARK: - Use Case Pills
-                UseCaseStrip()
-                    .opacity(contentOpacity)
-                
-                Spacer().frame(height: 28)
-                
+
                 // MARK: - Status Cards
                 VStack(spacing: 12) {
                     Button {
@@ -287,57 +281,6 @@ struct HomeView: View {
                 glassesDetected = false
             }
         }
-    }
-}
-
-// MARK: - Use Case Strip
-
-private struct UseCaseStrip: View {
-    private let cases: [(icon: String, label: String)] = [
-        ("eyes", "Identify"),
-        ("book.fill", "Learn"),
-        ("wrench.and.screwdriver", "Build"),
-        ("location.fill", "Navigate"),
-        ("leaf.fill", "Explore"),
-        ("translate", "Translate"),
-    ]
-    
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ForEach(cases, id: \.label) { item in
-                    UseCasePill(icon: item.icon, label: item.label)
-                }
-            }
-            .padding(.horizontal, 24)
-        }
-    }
-}
-
-private struct UseCasePill: View {
-    let icon: String
-    let label: String
-    
-    private let cyan = Color(hex: 0x00FFFF)
-    
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(.caption2, design: .rounded, weight: .medium))
-            Text(label)
-                .font(.system(.caption2, design: .rounded, weight: .medium))
-        }
-        .foregroundStyle(.white.opacity(0.6))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            Capsule()
-                .fill(.white.opacity(0.05))
-                .overlay(
-                    Capsule()
-                        .stroke(.white.opacity(0.08), lineWidth: 0.5)
-                )
-        )
     }
 }
 
