@@ -125,10 +125,14 @@ extension LiveKitManager: RoomDelegate {
 
     nonisolated func room(_ room: Room, participant: RemoteParticipant?, didReceiveData data: Data, forTopic topic: String, encryptionType: EncryptionType) {
 
+        
+
         if topic == "bounding_box" {
-            if let box = try? JSONDecoder().decode(BoundingBox.self, from: data) {
-                Task { @MainActor in
-                    self.boundingBoxes = [box]
+            Task {
+                if let box = try? JSONDecoder().decode(BoundingBox.self, from: data) {
+                    await MainActor.run {
+                        self.boundingBoxes = [box]
+                    }
                 }
             }
         }
@@ -152,15 +156,16 @@ extension LiveKitManager: RoomDelegate {
         Task { @MainActor in
             self.isConnected = false
             self.localVideoTrack = nil as VideoTrack?
-            if let error {
-                self.connectionError = error.localizedDescription
+            if let reason = disconnectReason {
+                self.connectionError = reason.description
             }
         }
     }
 
+
     nonisolated func room(_ room: Room, participant: LocalParticipant, didPublishTrack publication: LocalTrackPublication) {
-        if let videoTrack = publication.track as? VideoTrack {
-            Task { @MainActor in
+        Task { @MainActor in
+            if let videoTrack = publication.track as? VideoTrack {
                 self.localVideoTrack = videoTrack
             }
         }
