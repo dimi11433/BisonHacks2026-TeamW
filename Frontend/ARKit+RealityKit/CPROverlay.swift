@@ -1,79 +1,91 @@
 import RealityKit
 import ARKit
 
-class CPROverlay {
+class ARViewController: UIViewController, ARSessionDelegate {
     
-    // Creates two simple hands made of lines/boxes
-    static func makeCPRHands() -> Entity {
-        let root = Entity()
+    var arView: ARView!
+    var instructionLabel: UILabel!
+    var currentAnchor: AnchorEntity?
+    var bodyAnchor: AnchorEntity?
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
         
-        // Left hand
-        let leftHand = makeHand()
-        leftHand.position = [-0.06, 0, 0]
-        root.addChild(leftHand)
+        arView = ARView(frame: view.bounds)
+        arView.session.delegate = self
+        view.addSubview(arView)
         
-        // Right hand on top of left
-        let rightHand = makeHand()
-        rightHand.position = [-0.06, 0.02, 0]
-        root.addChild(rightHand)
+        instructionLabel = UILabel()
+        instructionLabel.frame = CGRect(x: 20, y: 60, width: view.bounds.width - 40, height: 80)
+        instructionLabel.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        instructionLabel.textColor = .white
+        instructionLabel.textAlignment = .center
+        instructionLabel.numberOfLines = 2
+        instructionLabel.font = UIFont.systemFont(ofSize: 20, weight: .bold)
+        instructionLabel.layer.cornerRadius = 12
+        instructionLabel.clipsToBounds = true
+        view.addSubview(instructionLabel)
         
-        // Add pump animation
-        animatePump(entity: root)
+        startAR()
         
-        return root
+        // TEMP TEST — remove before final demo
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            self.showStep(animation: "cpr_hands", instruction: "Place both hands on center of chest")
+        }
     }
     
-    // A hand made of simple white boxes — palm + 4 fingers
-    static func makeHand() -> Entity {
-        let hand = Entity()
-        let material = SimpleMaterial(color: .white, isMetallic: false)
+    func startAR() {
+        guard ARBodyTrackingConfiguration.isSupported else {
+            print("Body tracking not supported")
+            return
+        }
+        let config = ARBodyTrackingConfiguration()
+        arView.session.run(config)
+    }
+    
+    func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
+        for anchor in anchors {
+            guard let bodyAnchorDetected = anchor as? ARBodyAnchor else { continue }
+            let skeleton = bodyAnchorDetected.skeleton
+            let jointNames = ARSkeletonDefinition.defaultBody3D.jointNames
+            guard let index = jointNames.firstIndex(of: "spine_7_joint") else { continue }
+            let chestTransform = skeleton.jointModelTransforms[index]
+            bodyAnchor?.transform = Transform(matrix: bodyAnchorDetected.transform * chestTransform)
+        }
+    }
+    
+    func onStepReceived(animation: String, instruction: String) {
+        DispatchQueue.main.async {
+            self.showStep(animation: animation, instruction: instruction)
+        }
+    }
+    
+    private func showStep(animation: String, instruction: String) {
+        print("🟢 showStep called: \(animation)")
+        instructionLabel.text = instruction
+        currentAnchor?.removeFromParent()
         
-        // Palm
-        let palm = ModelEntity(
-            mesh: .generateBox(width: 0.08, height: 0.01, depth: 0.10),
-            materials: [material]
-        )
-        hand.addChild(palm)
+        let model = CPROverlay.makeCPRHands()
+        let anchor = AnchorEntity(world: .zero)
         
-        // 4 fingers
-        let fingerPositions: [Float] = [-0.03, -0.01, 0.01, 0.03]
-        for x in fingerPositions {
-            let finger = ModelEntity(
-                mesh: .generateBox(width: 0.015, height: 0.01, depth: 0.04),
-                materials: [material]
+        // Place 0.5m in front of camera
+        if let cameraTransform = arView.session.currentFrame?.camera.transform {
+            let forward = -simd_float3(
+                cameraTransform.columns.2.x,
+                cameraTransform.columns.2.y,
+                cameraTransform.columns.2.z
             )
-            finger.position = [x, 0, -0.07]
-            hand.addChild(finger)
+            anchor.position = simd_float3(
+                cameraTransform.columns.3.x,
+                cameraTransform.columns.3.y,
+                cameraTransform.columns.3.z
+            ) + forward * 0.5
         }
         
-        // Thumb
-        let thumb = ModelEntity(
-            mesh: .generateBox(width: 0.04, height: 0.01, depth: 0.015),
-            materials: [material]
-        )
-        thumb.position = [0.055, 0, 0.02]
-        hand.addChild(thumb)
-        
-        return hand
-    }
-    
-    // Pumping animation — moves up and down repeatedly
-    static func animatePump(entity: Entity) {
-        var downTransform = entity.transform
-        downTransform.translation.y -= 0.05 // push down 5cm
-        
-        let pushDown = FromToByAnimation<Transform>(
-            name: "pushDown",
-            from: entity.transform,
-            to: downTransform,
-            duration: 0.4,
-            timing: .easeInOut,
-            bindTarget: .transform,
-            repeatMode: .autoReverse
-        )
-        
-        if let animation = try? AnimationResource.generate(with: pushDown) {
-            entity.playAnimation(animation.repeat())
-        }
+        anchor.addChild(model)
+        arView.scene.addAnchor(anchor)
+        currentAnchor = anchor
+        bodyAnchor = anchor
+        print("🟢 anchor placed")
     }
 }
