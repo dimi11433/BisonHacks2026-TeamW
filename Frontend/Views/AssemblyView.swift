@@ -50,10 +50,6 @@ struct AssemblyView: View {
             Color.black.ignoresSafeArea()
             #endif
 
-            // MARK: - Bounding Box Overlay
-            BoundingBoxOverlay(boxes: viewModel.boundingBoxes)
-                .ignoresSafeArea()
-
             // MARK: - CPR Step Overlay
             if viewModel.showCPROverlay {
                 CPRAnimationOverlay(
